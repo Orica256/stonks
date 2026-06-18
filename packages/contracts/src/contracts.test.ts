@@ -1,0 +1,94 @@
+import { describe, expect, it } from "vitest";
+import {
+  Money,
+  PlaceOrderCommand,
+  AgentDecision,
+  Instrument,
+} from "./index.js";
+
+describe("Money schema", () => {
+  it("accepts decimal strings, rejects floats/garbage", () => {
+    expect(Money.safeParse({ amount: "100.50", currency: "JPY" }).success).toBe(
+      true,
+    );
+    expect(Money.safeParse({ amount: 100.5, currency: "JPY" }).success).toBe(
+      false,
+    );
+    expect(Money.safeParse({ amount: "1e3", currency: "USD" }).success).toBe(
+      false,
+    );
+  });
+});
+
+describe("PlaceOrderCommand schema", () => {
+  it("requires limitPrice for LIMIT orders", () => {
+    const r = PlaceOrderCommand.safeParse({
+      accountId: "a1",
+      instrumentId: "i1",
+      side: "BUY",
+      type: "LIMIT",
+      quantity: 100,
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("accepts a valid MARKET order", () => {
+    const r = PlaceOrderCommand.safeParse({
+      accountId: "a1",
+      instrumentId: "i1",
+      side: "BUY",
+      type: "MARKET",
+      quantity: 100,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects STOP_LIMIT without stopPrice", () => {
+    const r = PlaceOrderCommand.safeParse({
+      accountId: "a1",
+      instrumentId: "i1",
+      side: "SELL",
+      type: "STOP_LIMIT",
+      quantity: 100,
+      limitPrice: "1000",
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("AgentDecision schema (audit trail invariant)", () => {
+  it("requires a non-empty rationale", () => {
+    const base = {
+      id: "d1",
+      agentProfileId: "p1",
+      accountId: "a1",
+      ts: "2026-06-19T00:00:00Z",
+      model: "claude-opus-4-8",
+      inputContext: {},
+      proposedActions: [{ kind: "HOLD" }],
+    };
+    expect(AgentDecision.safeParse({ ...base, rationale: "" }).success).toBe(
+      false,
+    );
+    expect(
+      AgentDecision.safeParse({ ...base, rationale: "uptrend" }).success,
+    ).toBe(true);
+  });
+});
+
+describe("Instrument schema", () => {
+  it("defaults tickRules and isActive", () => {
+    const r = Instrument.parse({
+      id: "i1",
+      symbol: "7203",
+      exchange: "TSE",
+      market: "JP",
+      name: "Toyota",
+      currency: "JPY",
+      type: "STOCK",
+      lotSize: 100,
+    });
+    expect(r.tickRules).toEqual([]);
+    expect(r.isActive).toBe(true);
+  });
+});
