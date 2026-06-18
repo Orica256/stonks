@@ -26,6 +26,9 @@ packages/db/generated/
 npm-debug.log*
 pnpm-debug.log*
 
+# claude code agent worktrees
+.claude/worktrees/
+
 # editor / os
 .DS_Store
 Thumbs.db
