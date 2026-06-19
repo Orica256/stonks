@@ -1,0 +1,360 @@
+// Prisma スキーマ — データモデルの永続化定義（spec §5）。
+// 金額は Decimal、時刻は UTC(DateTime)。PriceBar は TimescaleDB hypertable 化する
+// （Prisma 管理外の生 SQL マイグレーションで変換。migrations/ に追補予定）。
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── 列挙 ──
+enum Market {
+  JP
+  US
+}
+
+enum Exchange {
+  TSE
+  NYSE
+  NASDAQ
+}
+
+enum Currency {
+  JPY
+  USD
+}
+
+enum InstrumentType {
+  STOCK
+  ETF
+}
+
+enum Timeframe {
+  m1
+  m5
+  m15
+  h1
+  d1
+}
+
+enum ManagedBy {
+  HUMAN
+  AGENT
+}
+
+enum OrderSide {
+  BUY
+  SELL
+}
+
+enum OrderType {
+  MARKET
+  LIMIT
+  STOP
+  STOP_LIMIT
+}
+
+enum TimeInForce {
+  DAY
+  GTC
+}
+
+enum OrderStatus {
+  PENDING
+  PARTIALLY_FILLED
+  FILLED
+  CANCELLED
+  REJECTED
+  EXPIRED
+}
+
+enum PositionSide {
+  LONG
+  SHORT
+}
+
+enum LedgerEntryType {
+  DEPOSIT
+  WITHDRAW
+  FEE
+  DIVIDEND
+  TAX
+  REALIZED_PNL
+  TRADE
+}
+
+enum CorporateActionType {
+  DIVIDEND
+  SPLIT
+}
+
+enum AgentMode {
+  MANUAL_MCP
+  AUTONOMOUS
+}
+
+// ── マーケットデータ ──
+model Instrument {
+  id        String         @id @default(cuid())
+  symbol    String
+  exchange  Exchange
+  market    Market
+  name      String
+  currency  Currency
+  type      InstrumentType @default(STOCK)
+  lotSize   Int            @default(1)
+  tickRules Json           @default("[]")
+  isActive  Boolean        @default(true)
+
+  bars             PriceBar[]
+  quotes           Quote[]
+  corporateActions CorporateAction[]
+  positions        Position[]
+  orders           Order[]
+  trades           Trade[]
+
+  @@unique([exchange, symbol])
+  @@index([market])
+}
+
+model PriceBar {
+  instrumentId String
+  timeframe    Timeframe
+  ts           DateTime
+  open         Decimal
+  high         Decimal
+  low          Decimal
+  close        Decimal
+  volume       Float
+
+  instrument Instrument @relation(fields: [instrumentId], references: [id])
+
+  @@id([instrumentId, timeframe, ts])
+  @@index([instrumentId, timeframe, ts])
+}
+
+model Quote {
+  id           String   @id @default(cuid())
+  instrumentId String
+  last         Decimal
+  bid          Decimal?
+  ask          Decimal?
+  ts           DateTime
+  source       String
+
+  instrument Instrument @relation(fields: [instrumentId], references: [id])
+
+  @@index([instrumentId, ts])
+}
+
+model CorporateAction {
+  id           String              @id @default(cuid())
+  instrumentId String
+  type         CorporateActionType
+  exDate       DateTime
+  value        Decimal
+
+  instrument Instrument @relation(fields: [instrumentId], references: [id])
+
+  @@index([instrumentId, exDate])
+}
+
+model FxRate {
+  id    String   @id @default(cuid())
+  base  Currency
+  quote Currency
+  rate  Decimal
+  ts    DateTime
+
+  @@index([base, quote, ts])
+}
+
+// ── 口座 ──
+model Account {
+  id             String    @id @default(cuid())
+  name           String
+  baseCurrency   Currency  @default(JPY)
+  managedBy      ManagedBy @default(HUMAN)
+  agentProfileId String?
+  createdAt      DateTime  @default(now())
+
+  agentProfile AgentProfile?         @relation(fields: [agentProfileId], references: [id])
+  cashBalances CashBalance[]
+  positions    Position[]
+  orders       Order[]
+  trades       Trade[]
+  ledger       CashLedgerEntry[]
+  realizedPnl  RealizedPnl[]
+  decisions    AgentDecision[]
+  snapshots    PerformanceSnapshot[]
+}
+
+model CashBalance {
+  accountId String
+  currency  Currency
+  amount    Decimal @default(0)
+
+  account Account @relation(fields: [accountId], references: [id])
+
+  @@id([accountId, currency])
+}
+
+// ── 取引 ──
+model Position {
+  id           String       @id @default(cuid())
+  accountId    String
+  instrumentId String
+  side         PositionSide @default(LONG)
+  quantity     Float
+  avgCost      Decimal
+  openedAt     DateTime     @default(now())
+
+  account    Account    @relation(fields: [accountId], references: [id])
+  instrument Instrument @relation(fields: [instrumentId], references: [id])
+
+  @@unique([accountId, instrumentId, side])
+}
+
+model Order {
+  id             String      @id @default(cuid())
+  accountId      String
+  instrumentId   String
+  side           OrderSide
+  type           OrderType
+  quantity       Float
+  filledQuantity Float       @default(0)
+  limitPrice     Decimal?
+  stopPrice      Decimal?
+  timeInForce    TimeInForce @default(DAY)
+  status         OrderStatus @default(PENDING)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  account    Account    @relation(fields: [accountId], references: [id])
+  instrument Instrument @relation(fields: [instrumentId], references: [id])
+  trades     Trade[]
+
+  @@index([accountId, status])
+}
+
+model Trade {
+  id           String    @id @default(cuid())
+  orderId      String
+  accountId    String
+  instrumentId String
+  side         OrderSide
+  quantity     Float
+  price        Decimal
+  fee          Decimal   @default(0)
+  currency     Currency
+  executedAt   DateTime  @default(now())
+
+  order      Order      @relation(fields: [orderId], references: [id])
+  account    Account    @relation(fields: [accountId], references: [id])
+  instrument Instrument @relation(fields: [instrumentId], references: [id])
+
+  @@index([accountId, executedAt])
+}
+
+model CashLedgerEntry {
+  id        String          @id @default(cuid())
+  accountId String
+  type      LedgerEntryType
+  currency  Currency
+  amount    Decimal
+  refId     String?
+  ts        DateTime        @default(now())
+
+  account Account @relation(fields: [accountId], references: [id])
+
+  @@index([accountId, ts])
+}
+
+model RealizedPnl {
+  id           String   @id @default(cuid())
+  accountId    String
+  instrumentId String
+  quantity     Float
+  costBasis    Decimal
+  proceeds     Decimal
+  realized     Decimal
+  currency     Currency
+  closedAt     DateTime @default(now())
+
+  account Account @relation(fields: [accountId], references: [id])
+
+  @@index([accountId, closedAt])
+}
+
+// ── 戦略・バックテスト（Phase 0 で契約確定、実装は Phase 3） ──
+model Strategy {
+  id         String        @id @default(cuid())
+  name       String
+  definition Json
+  createdAt  DateTime      @default(now())
+  runs       BacktestRun[]
+}
+
+model BacktestRun {
+  id         String   @id @default(cuid())
+  strategyId String
+  metrics    Json
+  equityCurve Json
+  createdAt  DateTime @default(now())
+
+  strategy Strategy @relation(fields: [strategyId], references: [id])
+}
+
+// ── AI エージェント取引（spec §2.7） ──
+model AgentProfile {
+  id             String    @id @default(cuid())
+  name           String
+  model          String
+  strategyPrompt String?
+  mode           AgentMode @default(MANUAL_MCP)
+  schedule       String?
+  riskLimits     Json      @default("{}")
+  enabled        Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+
+  accounts  Account[]
+  decisions AgentDecision[]
+}
+
+model AgentDecision {
+  id             String   @id @default(cuid())
+  agentProfileId String
+  accountId      String
+  ts             DateTime @default(now())
+  model          String
+  inputContext   Json
+  rationale      String
+  proposedActions Json
+  resultOrderIds String[]
+
+  agentProfile AgentProfile @relation(fields: [agentProfileId], references: [id])
+  account      Account      @relation(fields: [accountId], references: [id])
+
+  @@index([accountId, ts])
+}
+
+model PerformanceSnapshot {
+  id               String   @id @default(cuid())
+  accountId        String
+  ts               DateTime @default(now())
+  equity           Decimal
+  cash             Decimal
+  positionsValue   Decimal
+  cumulativeReturn Float
+  maxDrawdown      Float
+  sharpe           Float
+  winRate          Float
+
+  account Account @relation(fields: [accountId], references: [id])
+
+  @@index([accountId, ts])
+}

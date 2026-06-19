@@ -1,0 +1,30 @@
+# ローカル・無料運用（CLAUDE.md §0）: Postgres(TimescaleDB) と Redis をローカルで起動する。
+services:
+  db:
+    image: timescale/timescaledb:latest-pg16
+    container_name: stonks-db
+    environment:
+      POSTGRES_USER: stonks
+      POSTGRES_PASSWORD: stonks
+      POSTGRES_DB: stonks
+    ports:
+      - "5432:5432"
+    volumes:
+      - stonks-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stonks"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: stonks-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - stonks-redis-data:/data
+
+volumes:
+  stonks-db-data:
+  stonks-redis-data:
