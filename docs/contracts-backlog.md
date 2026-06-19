@@ -60,6 +60,7 @@
 
 ## ツール債務（契約ではないが要対応）
 
-### T1. ESLint 設定の配線が不統一
+### T1. ESLint 設定の配線が不統一 ✅ 対応済み
 - `packages/{portfolio,market-data,agent-trader}` には `eslint.config.js` があるが、`contracts/core-domain/analytics/trading-engine/db` には無く `pnpm -r lint` が一部失敗する（typecheck/test は全 green）。
 - → `packages/config` の共有 flat config を各パッケージで継承する `eslint.config.js` を統一配置（または root 集約）。`domain-architect`/config の領域。
+- → 対応済み: 5パッケージ（contracts/core-domain/analytics/trading-engine/db）に共有 flat config 継承の `eslint.config.js` を配置。`db` には `"lint": "eslint src"` スクリプトも追加。
