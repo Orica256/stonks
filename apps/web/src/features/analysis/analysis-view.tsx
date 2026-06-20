@@ -4,6 +4,7 @@ import { useState } from "react";
 import { cn } from "@/lib/cn";
 import { InstrumentPicker } from "./instrument-picker";
 import { ComparePanel } from "./compare-panel";
+import { HeatmapPanel } from "./heatmap-panel";
 
 /** 分析画面のタブ種別（spec §2.4 P2: 比較 / ヒートマップ / 描画ツール）。 */
 type Tab = "compare" | "heatmap" | "draw";
@@ -46,8 +47,10 @@ export function AnalysisView(): JSX.Element {
         <div>
           {tab === "compare" ? (
             <ComparePanel />
+          ) : tab === "heatmap" ? (
+            <HeatmapPanel />
           ) : (
-            <PlaceholderTab label={TABS.find((t) => t.value === tab)?.label} />
+            <PlaceholderTab label={TABS.find((t) => t.value === tab)?.label ?? ""} />
           )}
         </div>
       </div>
