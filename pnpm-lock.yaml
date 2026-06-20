@@ -135,6 +135,34 @@ importers:
         specifier: ^2.1.1
         version: 2.1.9(@types/node@20.19.43)
 
+  packages/backtest:
+    dependencies:
+      '@stonks/analytics':
+        specifier: workspace:*
+        version: link:../analytics
+      '@stonks/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@stonks/core-domain':
+        specifier: workspace:*
+        version: link:../core-domain
+      '@stonks/trading-engine':
+        specifier: workspace:*
+        version: link:../trading-engine
+      decimal.js:
+        specifier: ^10.4.3
+        version: 10.6.0
+    devDependencies:
+      '@stonks/config':
+        specifier: workspace:*
+        version: link:../config
+      typescript:
+        specifier: ^5.6.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.1
+        version: 2.1.9(@types/node@20.19.43)
+
   packages/config:
     devDependencies:
       '@eslint/js':
