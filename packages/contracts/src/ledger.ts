@@ -16,6 +16,8 @@ export const LedgerEntryType = z.enum([
   "TAX",
   "REALIZED_PNL",
   "TRADE", // 売買による現金移動
+  "INTEREST", // 信用買い建ての金利（Phase 3。費用=負）
+  "BORROW_FEE", // 信用売り建ての貸株料（Phase 3。費用=負）
 ]);
 export type LedgerEntryType = z.infer<typeof LedgerEntryType>;
 

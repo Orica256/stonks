@@ -9,6 +9,8 @@ import {
 } from "./common.js";
 import type { Instrument } from "./instrument.js";
 import type { RealizedPnl } from "./ledger.js";
+import { MarginInfo, MarginType } from "./margin.js";
+import type { TaxLot } from "./tax-lot.js";
 import type { Trade } from "./trade.js";
 
 export const PositionSide = z.enum(["LONG", "SHORT"]);
@@ -23,6 +25,16 @@ export const Position = z.object({
   avgCost: DecimalString, // 平均取得単価（建値）
   /** 建玉の取引通貨（B3: 自己記述的にし instrument→currency マップ回避を不要にする）。 */
   currency: Currency,
+  /**
+   * 資金区分（任意。未指定は CASH=現物として扱う。Phase 3）。
+   * 現物建玉は未設定のまま既存挙動を保つ（永続層は Prisma `@default(CASH)`）。
+   */
+  marginType: MarginType.optional(),
+  /**
+   * 信用建玉の保証金/金利情報（marginType === "MARGIN" のときのみ存在）。
+   * 現物建玉は undefined（spec §5.1 Position 信用拡張）。
+   */
+  margin: MarginInfo.optional(),
   openedAt: Timestamp,
 });
 export type Position = z.infer<typeof Position>;
@@ -83,6 +95,16 @@ export interface PortfolioService {
   getTrades(accountId: string): Promise<Trade[]>;
   /** 実現損益（trade 単位）の一覧（agent-trader の勝率計算等に使う。B2）。 */
   getRealizedPnl(accountId: string): Promise<RealizedPnl[]>;
+
+  /**
+   * 税ロット一覧（spec §2.3 P2 / §5.1 TaxLot。Phase 3）。
+   * 取得日昇順。`openOnly` が真なら残数量 > 0 の未決済ロットのみ返す。
+   * 実際のロット取り崩し（method 別の選択・実現損益算出）は portfolio が担う。
+   *
+   * 後方互換のため optional とする（Phase 2 の既存実装/フェイクを壊さない）。
+   * portfolio の税ロット実装タスクで必須化を検討する。
+   */
+  getTaxLots?(accountId: string, openOnly?: boolean): Promise<TaxLot[]>;
 }
 
 /**
