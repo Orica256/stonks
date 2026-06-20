@@ -7,8 +7,12 @@ import {
 import type {
   FeeModel,
   Instrument,
+  InterestAccrual,
+  MarginPolicy,
+  MarginPolicyProvider,
   Order,
   PlaceOrderCommand,
+  PositionSide,
   PriceProvider,
   Trade,
 } from "@stonks/contracts";
@@ -18,6 +22,13 @@ import type {
   OrderRepository,
 } from "./ports.js";
 import { SlippageFillModel } from "./fill-model.js";
+import {
+  annualRateForSide,
+  computeInterestAccrual,
+  computeMarginRequirement,
+  daysBetween,
+  hasSufficientMargin,
+} from "./margin.js";
 
 /**
  * 1 回の評価で約定可能な最大数量を返す流動性モデル（部分約定の源泉）。
@@ -37,6 +48,11 @@ export interface TradingEngineDeps {
   instruments: InstrumentProvider;
   feeModel: FeeModel;
   fillModel: SlippageFillModel;
+  /**
+   * 信用建ての保証金/金利規定値プロバイダ（任意。Phase 3）。
+   * 未注入だと MARGIN 発注は「信用不可」として一律拒否される（現物 CASH は影響なし）。
+   */
+  marginPolicy?: MarginPolicyProvider;
   /** 部分約定のための流動性モデル（任意。既定=全量約定）。 */
   liquidity?: LiquidityModel;
   /** ID 採番（任意。既定 crypto.randomUUID）。 */
@@ -67,6 +83,7 @@ export class StandardTradingEngine {
   private readonly instruments: InstrumentProvider;
   private readonly feeModel: FeeModel;
   private readonly fillModel: SlippageFillModel;
+  private readonly marginPolicy: MarginPolicyProvider | undefined;
   private readonly liquidity: LiquidityModel;
   private readonly generateId: () => string;
   private readonly clock: () => Date;
@@ -79,6 +96,7 @@ export class StandardTradingEngine {
     this.instruments = deps.instruments;
     this.feeModel = deps.feeModel;
     this.fillModel = deps.fillModel;
+    this.marginPolicy = deps.marginPolicy;
     this.liquidity = deps.liquidity ?? UNLIMITED_LIQUIDITY;
     this.generateId = deps.generateId ?? defaultIdGenerator;
     this.clock = deps.clock ?? (() => new Date());
@@ -115,8 +133,17 @@ export class StandardTradingEngine {
         ? roundToTick(command.stopPrice, instrument, command.side)
         : undefined;
 
-    // 事前チェック（現金/保有）。
-    await this.assertAffordable(command, instrument, limitPrice);
+    // 資金区分。未指定/CASH=現物、MARGIN=信用。
+    const isMargin = command.marginType === "MARGIN";
+
+    if (isMargin) {
+      // 信用: 銘柄ポリシーを解決し（null=信用不可→拒否）、必要保証金を充足判定する。
+      // ショート（SELL × MARGIN）は現物の保有数量チェックを通さず別ルートで建てる。
+      await this.assertMarginAffordable(command, instrument, limitPrice);
+    } else {
+      // 現物: 現金（買い）/ 保有（売り）の事前チェック。
+      await this.assertAffordable(command, instrument, limitPrice);
+    }
 
     const now = this.clock().toISOString();
     const order: Order = {
@@ -130,6 +157,8 @@ export class StandardTradingEngine {
       ...(limitPrice !== undefined ? { limitPrice } : {}),
       ...(stopPrice !== undefined ? { stopPrice } : {}),
       timeInForce: command.timeInForce,
+      // MARGIN のみ明示。CASH/未指定は現物として marginType を載せず後方互換に保つ。
+      ...(isMargin ? { marginType: "MARGIN" as const } : {}),
       status: "PENDING",
       createdAt: now,
       updatedAt: now,
@@ -248,6 +277,11 @@ export class StandardTradingEngine {
       price,
       fee: fee.amount,
       currency: instrument.currency,
+      // 建玉と同じ資金区分を伝播（portfolio が CASH/MARGIN を振り分ける）。
+      // CASH/未指定の現物は marginType を載せず後方互換に保つ。
+      ...(order.marginType === "MARGIN"
+        ? { marginType: "MARGIN" as const }
+        : {}),
       executedAt: now.toISOString(),
     };
 
@@ -329,5 +363,113 @@ export class StandardTradingEngine {
         `estimated cost ${estCost.amount} exceeds cash ${cash.amount}`,
       );
     }
+  }
+
+  /**
+   * 信用建ての事前チェック（spec §2.2 P2）。
+   *
+   * 1. MarginPolicyProvider で銘柄ポリシーを解決。null（信用不可）なら拒否。
+   * 2. MarginRequirement（notional × initialMarginRate）を組み、利用可能保証金
+   *    （現金余力）と突き合わせる。不足は INSUFFICIENT_FUNDS。
+   *
+   * ショート（SELL × MARGIN）は現物の保有数量チェックを通さず、保証金のみで判定する。
+   * MARKET は約定価格未確定のため、現状は事前の保証金チェックを行わない
+   *（指値系のみ厳密チェック。CASH 現物の MARKET 買いと同方針。B5 で予算上限が入れば厳密化可能）。
+   */
+  private async assertMarginAffordable(
+    cmd: PlaceOrderCommand,
+    instrument: Instrument,
+    limitPrice: string | undefined,
+  ): Promise<void> {
+    const policy = await this.resolveMarginPolicy(cmd.instrumentId);
+
+    // 約定価格未確定（MARKET）の場合は事前保証金チェックをスキップ（指値系のみ厳密化）。
+    const refPrice = limitPrice ?? cmd.limitPrice;
+    if (refPrice === undefined) return;
+
+    const requirement = computeMarginRequirement({
+      quantity: cmd.quantity,
+      price: refPrice,
+      policy,
+      currency: instrument.currency,
+    });
+
+    const availableMargin = await this.accountState.getAvailableCash(
+      cmd.accountId,
+      instrument.currency,
+    );
+    if (
+      !hasSufficientMargin(
+        requirement.requiredMargin,
+        availableMargin,
+        instrument.currency,
+      )
+    ) {
+      throw new DomainError(
+        "INSUFFICIENT_FUNDS",
+        `required margin ${requirement.requiredMargin} exceeds available ${availableMargin}`,
+      );
+    }
+  }
+
+  /** 銘柄の信用ポリシーを解決。プロバイダ未注入 or null（信用不可）なら拒否する。 */
+  private async resolveMarginPolicy(
+    instrumentId: string,
+  ): Promise<MarginPolicy> {
+    if (!this.marginPolicy) {
+      throw new DomainError(
+        "VALIDATION",
+        "margin trading is not configured (no MarginPolicyProvider)",
+      );
+    }
+    const policy = await this.marginPolicy.getMarginPolicy(instrumentId);
+    if (!policy) {
+      throw new DomainError(
+        "VALIDATION",
+        `margin trading is not allowed for instrument: ${instrumentId}`,
+      );
+    }
+    return policy;
+  }
+
+  /**
+   * 信用建玉に対する金利/貸株料の日次計上を 1 件算出する（純粋・副作用なし。spec §5.1）。
+   *
+   * principal × annualRate × days / 365 を費用（負の現金移動）として返す。経過日数は
+   * 直近計上時刻 `lastAccruedAt`（無ければ建玉開始 `openedAt`）から `now` までの UTC 日数差。
+   * 建玉の年利は LONG=買い建て金利、SHORT=貸株料（無ければ買い建て金利）を適用する。
+   *
+   * 責務分界（domain-architect 申し送り準拠）: 本メソッドは契約形の InterestAccrual を
+   * 返すだけで状態を持たない。CashLedger(INTEREST|BORROW_FEE) への記帳・Position.margin の
+   * accruedInterest/lastAccruedAt 更新は **portfolio** が行う（IF 越し。直接 import しない）。
+   */
+  accrueInterest(input: {
+    accountId: string;
+    positionId: string;
+    instrumentId: string;
+    side: PositionSide;
+    /** 建玉の総代金（principal）。 */
+    principal: string;
+    currency: Instrument["currency"];
+    policy: MarginPolicy;
+    /** 直近計上時刻（無ければ建玉開始時刻 openedAt）。 */
+    lastAccruedAt: Date;
+    /** 計上対象時刻（UTC）。既定は注入クロック。 */
+    now?: Date;
+  }): InterestAccrual {
+    const now = input.now ?? this.clock();
+    const days = daysBetween(input.lastAccruedAt, now);
+    return computeInterestAccrual({
+      id: this.generateId(),
+      accountId: input.accountId,
+      positionId: input.positionId,
+      instrumentId: input.instrumentId,
+      side: input.side,
+      principal: input.principal,
+      annualRate: annualRateForSide(input.side, input.policy),
+      days,
+      currency: input.currency,
+      accruedAt: now,
+    });
   }
 }

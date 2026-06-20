@@ -5,6 +5,7 @@ import type {
   EquityPoint,
   Position,
   RealizedPnl,
+  TaxLot,
   Trade,
 } from "@stonks/contracts";
 import type { PortfolioRepository } from "./repository.js";
@@ -25,6 +26,8 @@ export class InMemoryPortfolioRepository implements PortfolioRepository {
   private readonly realized = new Map<string, RealizedPnl[]>();
   private readonly trades = new Map<string, Trade[]>();
   private readonly equity = new Map<string, EquityPoint[]>();
+  /** 税ロット（追記順を保持。listTaxLots で取得日昇順に整列）。 */
+  private readonly taxLots = new Map<string, TaxLot[]>();
 
   async getPosition(
     accountId: string,
@@ -103,5 +106,34 @@ export class InMemoryPortfolioRepository implements PortfolioRepository {
 
   async listEquityPoints(accountId: string): Promise<EquityPoint[]> {
     return [...(this.equity.get(accountId) ?? [])];
+  }
+
+  async appendTaxLot(lot: TaxLot): Promise<void> {
+    const list = this.taxLots.get(lot.accountId) ?? [];
+    list.push({ ...lot });
+    this.taxLots.set(lot.accountId, list);
+  }
+
+  async saveTaxLot(lot: TaxLot): Promise<void> {
+    const list = this.taxLots.get(lot.accountId) ?? [];
+    const idx = list.findIndex((l) => l.id === lot.id);
+    if (idx >= 0) {
+      list[idx] = { ...lot };
+    } else {
+      list.push({ ...lot });
+    }
+    this.taxLots.set(lot.accountId, list);
+  }
+
+  async listTaxLots(
+    accountId: string,
+    instrumentId?: string,
+  ): Promise<TaxLot[]> {
+    return [...(this.taxLots.get(accountId) ?? [])]
+      .filter((l) => instrumentId === undefined || l.instrumentId === instrumentId)
+      .sort(
+        (a, b) =>
+          new Date(a.acquiredAt).getTime() - new Date(b.acquiredAt).getTime(),
+      );
   }
 }

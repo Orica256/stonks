@@ -3,10 +3,12 @@ import { Money as M } from "@stonks/core-domain";
 import { DomainError } from "@stonks/contracts";
 import type {
   CashLedgerEntry,
+  CostBasisMethod,
   Currency,
   EquityPoint,
   FxProvider,
   LedgerEntryType,
+  MarginInfo,
   Money,
   Position,
   PortfolioService,
@@ -14,12 +16,25 @@ import type {
   PositionView,
   PriceProvider,
   RealizedPnl,
+  TaxAccountType,
+  TaxLot,
+  TaxLotConsumption,
   Trade,
 } from "@stonks/contracts";
 import type { PortfolioRepository } from "./repository.js";
 
 /** 単調増加 ID 生成器（テスト決定性のため注入可能）。 */
 export type IdFactory = () => string;
+
+/**
+ * 信用建玉の保証金/金利情報を Trade から解決する任意フック（Phase 3）。
+ *
+ * 率・必要保証金の計算は trading-engine の責務。portfolio は受領した Trade と
+ * ロット管理に集中するため、MARGIN 建玉の `Position.margin`(MarginInfo) が必要な
+ * 場合のみこのフックで供給する。未注入なら MARGIN 建玉は `marginType` のみ自己記述的に
+ * 設定し `margin` は付さない（現物=CASH は常に未設定で既存挙動を保つ）。
+ */
+export type MarginInfoResolver = (trade: Trade) => MarginInfo | undefined;
 
 export interface PortfolioServiceDeps {
   repository: PortfolioRepository;
@@ -29,6 +44,15 @@ export interface PortfolioServiceDeps {
   baseCurrency: Currency;
   /** 監査用 ID 生成（省略時は連番）。 */
   newId?: IdFactory;
+  /**
+   * 税ロットの取得単価計算方式（spec §2.3 P2）。
+   * 既定 AVERAGE（総平均/移動平均。Phase 2 の実現損益＝平均建値と完全一致し後方互換）。
+   */
+  costBasisMethod?: CostBasisMethod;
+  /** 税ロットの口座区分（spec §2.3「特定/一般」）。既定 SPECIFIC。 */
+  taxAccountType?: TaxAccountType;
+  /** MARGIN 建玉の保証金/金利情報を Trade から解決する任意フック（Phase 3）。 */
+  marginInfoResolver?: MarginInfoResolver;
 }
 
 const ZERO = new Decimal(0);
@@ -50,6 +74,9 @@ export class DefaultPortfolioService implements PortfolioService {
   private readonly fx: FxProvider;
   private readonly baseCurrency: Currency;
   private readonly newId: IdFactory;
+  private readonly costBasisMethod: CostBasisMethod;
+  private readonly taxAccountType: TaxAccountType;
+  private readonly marginInfoResolver?: MarginInfoResolver;
   private seq = 0;
 
   constructor(deps: PortfolioServiceDeps) {
@@ -58,6 +85,9 @@ export class DefaultPortfolioService implements PortfolioService {
     this.fx = deps.fxProvider;
     this.baseCurrency = deps.baseCurrency;
     this.newId = deps.newId ?? (() => `pf-${++this.seq}`);
+    this.costBasisMethod = deps.costBasisMethod ?? "AVERAGE";
+    this.taxAccountType = deps.taxAccountType ?? "SPECIFIC";
+    this.marginInfoResolver = deps.marginInfoResolver;
   }
 
   /**
@@ -163,8 +193,28 @@ export class DefaultPortfolioService implements PortfolioService {
       avgCost: newAvg.toString(),
       currency: trade.currency, // B3: 建玉通貨を自己記述的に持つ
       openedAt: existing?.openedAt ?? trade.executedAt,
+      // Phase 3: 資金区分は Trade を信頼して振り分ける（既定 CASH は未設定で既存挙動を維持）。
+      ...this.resolveMargin(trade, existing),
     };
     await this.repo.savePosition(position);
+
+    // Phase 3: 取得（買い）ごとに税ロットを 1 件起こす（spec §2.3 P2 / §5.1 TaxLot）。
+    // ロット取得単価は手数料込みの 1 株あたり取得価額（= Position.avgCost と同じ建値基準）。
+    const lotCostBasis = principal.plus(fee).dividedBy(qty);
+    const taxLot: TaxLot = {
+      id: this.newId(),
+      accountId: trade.accountId,
+      instrumentId: trade.instrumentId,
+      quantity: qty.toNumber(),
+      remainingQuantity: qty.toNumber(),
+      costBasis: lotCostBasis.toString(),
+      currency: trade.currency,
+      acquiredAt: trade.executedAt,
+      method: this.costBasisMethod,
+      taxAccountType: this.taxAccountType,
+      acquiredTradeId: trade.id,
+    };
+    await this.repo.appendTaxLot(taxLot);
 
     // 現金: 約定代金 + 手数料の流出。台帳は TRADE(本体) と FEE(手数料) に分離。
     await this.adjustCash(
@@ -183,6 +233,26 @@ export class DefaultPortfolioService implements PortfolioService {
         trade.id,
       );
     }
+  }
+
+  /**
+   * Trade の資金区分から建玉の marginType / margin を解決する（Phase 3）。
+   * - CASH/未指定（現物）: 何も付さない（既存挙動を維持）。
+   * - MARGIN（信用）: `marginType="MARGIN"` を設定。保証金/金利情報（MarginInfo）は
+   *   率計算が trading-engine 責務のため、注入された marginInfoResolver があれば付す
+   *   （既存建玉に margin があれば保持）。
+   */
+  private resolveMargin(
+    trade: Trade,
+    existing: Position | undefined,
+  ): Pick<Position, "marginType" | "margin"> {
+    if (trade.marginType !== "MARGIN") return {};
+    const margin =
+      this.marginInfoResolver?.(trade) ?? existing?.margin;
+    return {
+      marginType: "MARGIN",
+      ...(margin !== undefined ? { margin } : {}),
+    };
   }
 
   private async applySell(
@@ -206,8 +276,16 @@ export class DefaultPortfolioService implements PortfolioService {
     }
     const avg = existing ? new Decimal(existing.avgCost) : ZERO;
 
-    // 実現損益 = 売却代金 - 取得原価(平均建値×数量) - 手数料。
-    const costBasis = avg.times(qty);
+    // Phase 3: 取得単価計算方式（method）に従って税ロットを取り崩す。
+    // AVERAGE は平均建値ベースで取得原価を出し、Phase 2 の実現損益と完全一致する。
+    // FIFO/LIFO/SPECIFIC_LOT は選択ロットの取得単価合計を取得原価にする。
+    const { consumptions, costBasis } = await this.consumeTaxLots(
+      trade,
+      qty,
+      avg,
+    );
+
+    // 実現損益 = 売却代金 - 取得原価 - 手数料。
     const proceeds = principal;
     const realized = proceeds.minus(costBasis).minus(fee);
 
@@ -215,7 +293,7 @@ export class DefaultPortfolioService implements PortfolioService {
     if (remaining.lte(ZERO)) {
       await this.repo.removePosition(trade.accountId, trade.instrumentId);
     } else if (existing) {
-      // 平均建値は売却で変化しない（一部売却）。
+      // 平均建値は売却で変化しない（一部売却。method 非依存で残ロットと整合する）。
       await this.repo.savePosition({ ...existing, quantity: remaining.toNumber() });
     }
 
@@ -231,6 +309,13 @@ export class DefaultPortfolioService implements PortfolioService {
       closedAt: trade.executedAt,
     };
     await this.repo.appendRealizedPnl(realizedEntry);
+    // 税ロット由来の詳細（どのロットをいくつ取り崩したか）も併記で記録する。
+    await this.repo.appendRealizedPnlWithLots({
+      ...realizedEntry,
+      lots: consumptions,
+      method: this.costBasisMethod,
+      ...(trade.id !== undefined ? { closedTradeId: trade.id } : {}),
+    });
 
     // 現金: 売却代金が流入、手数料が流出。
     await this.adjustCash(

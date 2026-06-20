@@ -1,4 +1,10 @@
-import type { Currency, Instrument, Order } from "@stonks/contracts";
+import type {
+  Currency,
+  Instrument,
+  MarginPolicy,
+  MarginPolicyProvider,
+  Order,
+} from "@stonks/contracts";
 import type {
   AccountStateProvider,
   InstrumentProvider,
@@ -83,5 +89,26 @@ export class InMemoryInstrumentProvider implements InstrumentProvider {
 
   async getById(instrumentId: string): Promise<Instrument | null> {
     return this.instruments.get(instrumentId) ?? null;
+  }
+}
+
+/**
+ * in-memory な MarginPolicyProvider（テスト・Phase 1 用）。
+ * 登録済み銘柄はポリシーを返し、未登録は null（信用不可→ MARGIN 発注は拒否）。
+ * Phase 2 で市場ルール/設定由来のアダプタに差し替える。
+ */
+export class InMemoryMarginPolicyProvider implements MarginPolicyProvider {
+  private readonly policies = new Map<string, MarginPolicy>();
+
+  constructor(initial: Record<string, MarginPolicy> = {}) {
+    for (const [k, v] of Object.entries(initial)) this.policies.set(k, v);
+  }
+
+  set(instrumentId: string, policy: MarginPolicy): void {
+    this.policies.set(instrumentId, policy);
+  }
+
+  async getMarginPolicy(instrumentId: string): Promise<MarginPolicy | null> {
+    return this.policies.get(instrumentId) ?? null;
   }
 }

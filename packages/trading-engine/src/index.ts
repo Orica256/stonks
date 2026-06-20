@@ -16,6 +16,17 @@ export type { FeeModelConfig, JpFeeTier } from "./fee-model.js";
 export { SlippageFillModel, DEFAULT_FILL_CONFIG } from "./fill-model.js";
 export type { FillModelConfig } from "./fill-model.js";
 
+export {
+  DAYS_PER_YEAR,
+  computeMarginRequirement,
+  marginPositionSide,
+  annualRateForSide,
+  accrualTypeForSide,
+  daysBetween,
+  computeInterestAccrual,
+  hasSufficientMargin,
+} from "./margin.js";
+
 export type {
   OrderRepository,
   AccountStateProvider,
@@ -26,4 +37,5 @@ export {
   InMemoryOrderRepository,
   InMemoryAccountStateProvider,
   InMemoryInstrumentProvider,
+  InMemoryMarginPolicyProvider,
 } from "./in-memory.js";

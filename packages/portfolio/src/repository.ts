@@ -5,6 +5,7 @@ import type {
   EquityPoint,
   Position,
   RealizedPnl,
+  TaxLot,
   Trade,
 } from "@stonks/contracts";
 
@@ -38,6 +39,17 @@ export interface PortfolioRepository {
 
   appendEquityPoint(accountId: string, point: EquityPoint): Promise<void>;
   listEquityPoints(accountId: string): Promise<EquityPoint[]>;
+
+  /**
+   * 税ロット（spec §2.3 P2 / §5.1 TaxLot。Phase 3）。
+   * 取得（買い）ごとに 1 ロットを追記し、売却の取り崩しで `remainingQuantity`
+   * を更新（saveTaxLot で upsert）する。一覧は取得日昇順を保証する。
+   */
+  appendTaxLot(lot: TaxLot): Promise<void>;
+  /** 既存ロットの更新（取り崩し後の remainingQuantity を反映）。 */
+  saveTaxLot(lot: TaxLot): Promise<void>;
+  /** 口座×銘柄の税ロット（取得日昇順）。 */
+  listTaxLots(accountId: string, instrumentId?: string): Promise<TaxLot[]>;
 }
 
 /** 副作用のない参照だけが欲しい層のための読み取り専用ビュー。 */
@@ -49,4 +61,5 @@ export type PortfolioReadModel = Pick<
   | "listRealizedPnl"
   | "listTrades"
   | "listEquityPoints"
+  | "listTaxLots"
 >;
