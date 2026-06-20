@@ -1,5 +1,6 @@
 import Decimal from "decimal.js";
 import { Money as M } from "@stonks/core-domain";
+import { DomainError } from "@stonks/contracts";
 import type {
   CashLedgerEntry,
   Currency,
@@ -50,8 +51,6 @@ export class DefaultPortfolioService implements PortfolioService {
   private readonly baseCurrency: Currency;
   private readonly newId: IdFactory;
   private seq = 0;
-  /** 銘柄の取引通貨（Position 契約に通貨が無いため内部で記憶。換算に使う）。 */
-  private readonly instrumentCurrency = new Map<string, Currency>();
 
   constructor(deps: PortfolioServiceDeps) {
     this.repo = deps.repository;
@@ -69,6 +68,45 @@ export class DefaultPortfolioService implements PortfolioService {
     await this.adjustCash(accountId, amount, "DEPOSIT", at);
   }
 
+  /**
+   * 出金。現金残高と CashLedger(WITHDRAW) を整合更新する（B4）。
+   * 残高不足は受け付けない（spec §5.2 現金 = 台帳合計の整合維持）。
+   */
+  async withdraw(accountId: string, amount: Money, at: Date = new Date()): Promise<void> {
+    const requested = new Decimal(amount.amount);
+    if (requested.lte(ZERO)) {
+      throw new DomainError("VALIDATION", `withdraw amount must be > 0 (got ${amount.amount})`);
+    }
+    const existing = await this.repo.getCashBalance(accountId, amount.currency);
+    const current = existing ? new Decimal(existing.amount) : ZERO;
+    if (requested.gt(current)) {
+      throw new DomainError(
+        "INSUFFICIENT_FUNDS",
+        `withdraw ${amount.amount} exceeds cash ${current.toString()} (${amount.currency})`,
+      );
+    }
+    await this.adjustCash(
+      accountId,
+      M.money(requested.negated(), amount.currency),
+      "WITHDRAW",
+      at,
+    );
+  }
+
+  async getTrades(accountId: string): Promise<Trade[]> {
+    const trades = await this.repo.listTrades(accountId);
+    return trades
+      .slice()
+      .sort(
+        (a, b) =>
+          new Date(a.executedAt).getTime() - new Date(b.executedAt).getTime(),
+      );
+  }
+
+  async getRealizedPnl(accountId: string): Promise<RealizedPnl[]> {
+    return this.repo.listRealizedPnl(accountId);
+  }
+
   async applyTrade(trade: Trade): Promise<void> {
     const at = new Date(trade.executedAt);
     const qty = new Decimal(trade.quantity);
@@ -81,7 +119,9 @@ export class DefaultPortfolioService implements PortfolioService {
       throw new Error(`trade fee must be >= 0 (got ${trade.fee})`);
     }
     const principal = price.times(qty); // 約定代金（手数料抜き）
-    this.instrumentCurrency.set(trade.instrumentId, trade.currency);
+
+    // 取引履歴を記録（B2: getTrades 用。spec §6.8）。
+    await this.repo.appendTrade(trade);
 
     if (trade.side === "BUY") {
       await this.applyBuy(trade, qty, price, principal, fee, at);
@@ -121,6 +161,7 @@ export class DefaultPortfolioService implements PortfolioService {
       side: "LONG",
       quantity: newQty.toNumber(),
       avgCost: newAvg.toString(),
+      currency: trade.currency, // B3: 建玉通貨を自己記述的に持つ
       openedAt: existing?.openedAt ?? trade.executedAt,
     };
     await this.repo.savePosition(position);
@@ -356,8 +397,8 @@ export class DefaultPortfolioService implements PortfolioService {
     }
     for (const p of await this.repo.listPositions(accountId)) {
       const costValue = new Decimal(p.avgCost).times(p.quantity);
-      const currency = this.instrumentCurrency.get(p.instrumentId) ?? this.baseCurrency;
-      equity = equity.plus(await this.toBase(costValue, currency, at));
+      // B3: 建玉通貨は Position 自身が持つ（内部マップ不要）。
+      equity = equity.plus(await this.toBase(costValue, p.currency, at));
     }
     await this.repo.appendEquityPoint(accountId, {
       ts: at.toISOString(),

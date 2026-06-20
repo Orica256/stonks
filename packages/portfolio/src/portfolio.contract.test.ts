@@ -3,6 +3,8 @@ import {
   EquityPoint,
   PortfolioSummary,
   PositionView,
+  RealizedPnl,
+  Trade,
   type PortfolioService,
 } from "@stonks/contracts";
 import { DefaultPortfolioService } from "./portfolio-service.js";
@@ -13,10 +15,8 @@ import { FakeFxProvider, FakePriceProvider } from "./fakes.js";
  * 契約遵守テスト（CLAUDE.md §3）。
  * 公開実装が contracts の PortfolioService に一致し、出力が各スキーマに通ることを保証する。
  */
-const build = (): PortfolioService & {
-  deposit: DefaultPortfolioService["deposit"];
-} => {
-  const svc = new DefaultPortfolioService({
+const build = (): PortfolioService => {
+  return new DefaultPortfolioService({
     repository: new InMemoryPortfolioRepository(),
     priceProvider: new FakePriceProvider({
       "i-1": { amount: "1200", currency: "JPY" },
@@ -24,7 +24,6 @@ const build = (): PortfolioService & {
     fxProvider: new FakeFxProvider("150"),
     baseCurrency: "JPY",
   });
-  return svc;
 };
 
 describe("PortfolioService 契約遵守", () => {
@@ -34,6 +33,10 @@ describe("PortfolioService 契約遵守", () => {
     expect(typeof svc.getPositions).toBe("function");
     expect(typeof svc.getSummary).toBe("function");
     expect(typeof svc.getHistory).toBe("function");
+    expect(typeof svc.deposit).toBe("function");
+    expect(typeof svc.withdraw).toBe("function");
+    expect(typeof svc.getTrades).toBe("function");
+    expect(typeof svc.getRealizedPnl).toBe("function");
   });
 
   it("出力は PositionView / PortfolioSummary / EquityPoint スキーマに通る", async () => {
@@ -65,5 +68,35 @@ describe("PortfolioService 契約遵守", () => {
     });
     expect(history.length).toBeGreaterThan(0);
     expect(EquityPoint.parse(history[0])).toBeTruthy();
+
+    // B2: 取引履歴・実現損益の読み取り IF。
+    const trades = await svc.getTrades("a");
+    expect(trades).toHaveLength(1);
+    expect(Trade.parse(trades[0])).toBeTruthy();
+
+    await svc.applyTrade({
+      id: "t2",
+      orderId: "o2",
+      accountId: "a",
+      instrumentId: "i-1",
+      side: "SELL",
+      quantity: 40,
+      price: "1500",
+      fee: "0",
+      currency: "JPY",
+      executedAt: "2026-06-19T01:00:00.000Z",
+    });
+    const realized = await svc.getRealizedPnl("a");
+    expect(realized).toHaveLength(1);
+    expect(RealizedPnl.parse(realized[0])).toBeTruthy();
+  });
+
+  it("withdraw は残高不足を拒否する（B4）", async () => {
+    const svc = build();
+    await svc.deposit("w", { amount: "1000", currency: "JPY" });
+    await svc.withdraw("w", { amount: "400", currency: "JPY" });
+    await expect(
+      svc.withdraw("w", { amount: "700", currency: "JPY" }),
+    ).rejects.toThrow(/INSUFFICIENT_FUNDS|exceeds/);
   });
 });

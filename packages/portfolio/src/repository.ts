@@ -5,6 +5,7 @@ import type {
   EquityPoint,
   Position,
   RealizedPnl,
+  Trade,
 } from "@stonks/contracts";
 
 /**
@@ -31,6 +32,10 @@ export interface PortfolioRepository {
   appendRealizedPnl(entry: RealizedPnl): Promise<void>;
   listRealizedPnl(accountId: string): Promise<RealizedPnl[]>;
 
+  /** 取引履歴（Trade）の追記・参照（B2: 履歴 IF を PortfolioService に出すため）。 */
+  appendTrade(trade: Trade): Promise<void>;
+  listTrades(accountId: string): Promise<Trade[]>;
+
   appendEquityPoint(accountId: string, point: EquityPoint): Promise<void>;
   listEquityPoints(accountId: string): Promise<EquityPoint[]>;
 }
@@ -42,5 +47,6 @@ export type PortfolioReadModel = Pick<
   | "listCashBalances"
   | "listLedgerEntries"
   | "listRealizedPnl"
+  | "listTrades"
   | "listEquityPoints"
 >;

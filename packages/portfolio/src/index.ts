@@ -11,6 +11,7 @@ export type {
   PortfolioServiceDeps,
 } from "./portfolio-service.js";
 export { InMemoryPortfolioRepository } from "./in-memory-repository.js";
+export { RepositoryAccountStateProvider } from "./account-state-provider.js";
 export type {
   PortfolioReadModel,
   PortfolioRepository,
