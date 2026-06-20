@@ -5,6 +5,7 @@ import type {
   EquityPoint,
   Position,
   RealizedPnl,
+  RealizedPnlWithLots,
   TaxLot,
   Trade,
 } from "@stonks/contracts";
@@ -24,6 +25,7 @@ export class InMemoryPortfolioRepository implements PortfolioRepository {
   private readonly cash = new Map<string, CashBalance>();
   private readonly ledger = new Map<string, CashLedgerEntry[]>();
   private readonly realized = new Map<string, RealizedPnl[]>();
+  private readonly realizedWithLots = new Map<string, RealizedPnlWithLots[]>();
   private readonly trades = new Map<string, Trade[]>();
   private readonly equity = new Map<string, EquityPoint[]>();
   /** 税ロット（追記順を保持。listTaxLots で取得日昇順に整列）。 */
@@ -83,6 +85,18 @@ export class InMemoryPortfolioRepository implements PortfolioRepository {
 
   async listRealizedPnl(accountId: string): Promise<RealizedPnl[]> {
     return [...(this.realized.get(accountId) ?? [])];
+  }
+
+  async appendRealizedPnlWithLots(entry: RealizedPnlWithLots): Promise<void> {
+    const list = this.realizedWithLots.get(entry.accountId) ?? [];
+    list.push({ ...entry });
+    this.realizedWithLots.set(entry.accountId, list);
+  }
+
+  async listRealizedPnlWithLots(
+    accountId: string,
+  ): Promise<RealizedPnlWithLots[]> {
+    return [...(this.realizedWithLots.get(accountId) ?? [])];
   }
 
   async appendTrade(trade: Trade): Promise<void> {

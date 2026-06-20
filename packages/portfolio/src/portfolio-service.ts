@@ -76,7 +76,7 @@ export class DefaultPortfolioService implements PortfolioService {
   private readonly newId: IdFactory;
   private readonly costBasisMethod: CostBasisMethod;
   private readonly taxAccountType: TaxAccountType;
-  private readonly marginInfoResolver?: MarginInfoResolver;
+  private readonly marginInfoResolver: MarginInfoResolver | undefined;
   private seq = 0;
 
   constructor(deps: PortfolioServiceDeps) {
@@ -135,6 +135,17 @@ export class DefaultPortfolioService implements PortfolioService {
 
   async getRealizedPnl(accountId: string): Promise<RealizedPnl[]> {
     return this.repo.listRealizedPnl(accountId);
+  }
+
+  /**
+   * 税ロット一覧（spec §2.3 P2）。`openOnly` で残数量 > 0 の未決済ロットに絞る。
+   * 取得日昇順（repository が保証）。
+   */
+  async getTaxLots(accountId: string, openOnly = false): Promise<TaxLot[]> {
+    const lots = await this.repo.listTaxLots(accountId);
+    return openOnly
+      ? lots.filter((l) => new Decimal(l.remainingQuantity).gt(ZERO))
+      : lots;
   }
 
   async applyTrade(trade: Trade): Promise<void> {
@@ -344,6 +355,49 @@ export class DefaultPortfolioService implements PortfolioService {
       refId: trade.id,
       ts: trade.executedAt,
     });
+  }
+
+  /**
+   * 売却数量 `qty` を取得単価計算方式（method）に従って税ロットから取り崩す（spec §2.3 P2）。
+   * - FIFO: 取得日昇順、LIFO: 降順、SPECIFIC_LOT: 明示選択が無いため当面 FIFO 順に倒す。
+   * - AVERAGE: 取り崩し自体は FIFO 順で remainingQuantity を減らすが、取得原価は
+   *   平均建値（`avgCost × qty`）を用い、Phase 2 の実現損益と完全一致させる。
+   * 取り崩した各ロットの remainingQuantity を upsert し、内訳（TaxLotConsumption）と
+   * 取得原価合計（costBasis）を返す。
+   */
+  private async consumeTaxLots(
+    trade: Trade,
+    qty: Decimal,
+    avgCost: Decimal,
+  ): Promise<{ consumptions: TaxLotConsumption[]; costBasis: Decimal }> {
+    const lots = await this.repo.listTaxLots(trade.accountId, trade.instrumentId);
+    const open = lots.filter((l) => new Decimal(l.remainingQuantity).gt(ZERO));
+    const ordered = this.costBasisMethod === "LIFO" ? [...open].reverse() : open;
+
+    const consumptions: TaxLotConsumption[] = [];
+    let remaining = qty;
+    let lotCostBasis = ZERO; // FIFO/LIFO/SPECIFIC_LOT 用の取り崩しロット原価合計
+
+    for (const lot of ordered) {
+      if (remaining.lte(ZERO)) break;
+      const lotRemain = new Decimal(lot.remainingQuantity);
+      const take = Decimal.min(lotRemain, remaining);
+      consumptions.push({
+        taxLotId: lot.id,
+        quantity: take.toNumber(),
+        costBasis: lot.costBasis,
+      });
+      lotCostBasis = lotCostBasis.plus(take.times(new Decimal(lot.costBasis)));
+      await this.repo.saveTaxLot({
+        ...lot,
+        remainingQuantity: lotRemain.minus(take).toNumber(),
+      });
+      remaining = remaining.minus(take);
+    }
+
+    const costBasis =
+      this.costBasisMethod === "AVERAGE" ? avgCost.times(qty) : lotCostBasis;
+    return { consumptions, costBasis };
   }
 
   async getPositions(accountId: string): Promise<PositionView[]> {

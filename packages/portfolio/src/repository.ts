@@ -5,6 +5,7 @@ import type {
   EquityPoint,
   Position,
   RealizedPnl,
+  RealizedPnlWithLots,
   TaxLot,
   Trade,
 } from "@stonks/contracts";
@@ -32,6 +33,13 @@ export interface PortfolioRepository {
 
   appendRealizedPnl(entry: RealizedPnl): Promise<void>;
   listRealizedPnl(accountId: string): Promise<RealizedPnl[]>;
+
+  /**
+   * 税ロット由来の実現損益詳細（どのロットをいくつ取り崩したか）。Phase 3。
+   * 既存 `RealizedPnl` とは別に併記で記録し、税ロットの監査・表示に用いる。
+   */
+  appendRealizedPnlWithLots(entry: RealizedPnlWithLots): Promise<void>;
+  listRealizedPnlWithLots(accountId: string): Promise<RealizedPnlWithLots[]>;
 
   /** 取引履歴（Trade）の追記・参照（B2: 履歴 IF を PortfolioService に出すため）。 */
   appendTrade(trade: Trade): Promise<void>;
