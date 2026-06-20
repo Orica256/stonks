@@ -37,9 +37,11 @@ export interface PortfolioRepository {
   /**
    * 税ロット由来の実現損益詳細（どのロットをいくつ取り崩したか）。Phase 3。
    * 既存 `RealizedPnl` とは別に併記で記録し、税ロットの監査・表示に用いる。
+   * 専用の永続化先が無い実装（例: 現状の Prisma 本番リポジトリ）では未提供で良いため optional。
+   * 基本の `RealizedPnl` は別途 `appendRealizedPnl` で必ず記録される（情報欠落なし）。
    */
-  appendRealizedPnlWithLots(entry: RealizedPnlWithLots): Promise<void>;
-  listRealizedPnlWithLots(accountId: string): Promise<RealizedPnlWithLots[]>;
+  appendRealizedPnlWithLots?(entry: RealizedPnlWithLots): Promise<void>;
+  listRealizedPnlWithLots?(accountId: string): Promise<RealizedPnlWithLots[]>;
 
   /** 取引履歴（Trade）の追記・参照（B2: 履歴 IF を PortfolioService に出すため）。 */
   appendTrade(trade: Trade): Promise<void>;

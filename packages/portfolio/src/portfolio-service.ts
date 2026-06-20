@@ -320,8 +320,9 @@ export class DefaultPortfolioService implements PortfolioService {
       closedAt: trade.executedAt,
     };
     await this.repo.appendRealizedPnl(realizedEntry);
-    // 税ロット由来の詳細（どのロットをいくつ取り崩したか）も併記で記録する。
-    await this.repo.appendRealizedPnlWithLots({
+    // 税ロット由来の詳細（どのロットをいくつ取り崩したか）も併記で記録する
+    // （専用永続化先を持たないリポジトリでは optional なので存在時のみ）。
+    await this.repo.appendRealizedPnlWithLots?.({
       ...realizedEntry,
       lots: consumptions,
       method: this.costBasisMethod,
