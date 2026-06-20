@@ -213,6 +213,7 @@ describe("AgentTradingService.buildObservation", () => {
           side: "LONG",
           quantity: 100,
           avgCost: "900",
+          currency: "JPY",
           openedAt: NOW.toISOString(),
           marketPrice: "1000",
           marketValue: { amount: "100000", currency: "JPY" },
@@ -236,6 +237,60 @@ describe("AgentTradingService.buildObservation", () => {
     expect(obs.cashByCurrency).toEqual({ JPY: "500000" });
     expect(obs.positions).toHaveLength(1);
     expect(obs.positions[0]!.instrumentId).toBe("i-1");
+    // resolver 未注入時は symbol は instrumentId にフォールバック（B2）。
+    expect(obs.positions[0]!.symbol).toBe("i-1");
     expect(obs.recentQuotes[0]!.last).toBe("1000");
+  });
+
+  it("InstrumentResolver があれば symbol を解決する（B2）", async () => {
+    const portfolio = new FakePortfolioService({
+      summary: summary({ cash: { amount: "500000", currency: "JPY" } }),
+      positions: [
+        {
+          id: "pos-1",
+          accountId: "acc",
+          instrumentId: "TSE:7203",
+          side: "LONG",
+          quantity: 100,
+          avgCost: "900",
+          currency: "JPY",
+          openedAt: NOW.toISOString(),
+          marketPrice: "1000",
+          marketValue: { amount: "100000", currency: "JPY" },
+          unrealizedPnl: { amount: "10000", currency: "JPY" },
+          unrealizedPnlPct: 11.1,
+        },
+      ],
+    });
+    const svc = new DefaultAgentTradingService({
+      profiles: new FakeAgentProfileProvider({ "p-1": profile() }),
+      portfolio,
+      priceProvider: new FakePriceProvider({
+        "TSE:7203": { amount: "1000", currency: "JPY" },
+      }),
+      tradingEngine: new FakeTradingEngine(),
+      decisions: new InMemoryAgentDecisionRepository(),
+      instruments: {
+        async getById(id: string) {
+          if (id !== "TSE:7203") return null;
+          return {
+            id: "TSE:7203",
+            symbol: "7203",
+            exchange: "TSE",
+            market: "JP",
+            name: "Toyota",
+            currency: "JPY",
+            type: "STOCK",
+            lotSize: 100,
+            tickRules: [],
+            isActive: true,
+          };
+        },
+      },
+      now: () => NOW,
+    });
+    const obs = await svc.buildObservation("acc");
+    expect(obs.positions[0]!.symbol).toBe("7203");
+    expect(obs.recentQuotes[0]!.symbol).toBe("7203");
   });
 });

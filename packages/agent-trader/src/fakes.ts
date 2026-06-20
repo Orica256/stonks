@@ -8,6 +8,7 @@ import type {
   PortfolioSummary,
   PositionView,
   PriceProvider,
+  RealizedPnl,
   Trade,
   TradingEngine,
 } from "@stonks/contracts";
@@ -100,6 +101,8 @@ export interface FakePortfolioState {
   summary: PortfolioSummary;
   positions?: PositionView[];
   history?: EquityPoint[];
+  trades?: Trade[];
+  realizedPnl?: RealizedPnl[];
 }
 
 /** 注入したスナップショットを返すだけの PortfolioService。 */
@@ -113,11 +116,23 @@ export class FakePortfolioService implements PortfolioService {
   async applyTrade(): Promise<void> {
     /* no-op */
   }
+  async deposit(): Promise<void> {
+    /* no-op */
+  }
+  async withdraw(): Promise<void> {
+    /* no-op */
+  }
   async getPositions(): Promise<PositionView[]> {
     return this.state.positions ?? [];
   }
   async getSummary(): Promise<PortfolioSummary> {
     return this.state.summary;
+  }
+  async getTrades(): Promise<Trade[]> {
+    return this.state.trades ?? [];
+  }
+  async getRealizedPnl(): Promise<RealizedPnl[]> {
+    return this.state.realizedPnl ?? [];
   }
   async getHistory(
     _accountId: string,

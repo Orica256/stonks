@@ -5,6 +5,7 @@ import type {
   AgentObservation,
   AgentProfile,
   AgentTradingService as IAgentTradingService,
+  InstrumentResolver,
   Order,
   PortfolioService,
   PriceProvider,
@@ -34,6 +35,11 @@ export interface AgentTradingServiceDeps {
   priceProvider: PriceProvider;
   tradingEngine: TradingEngine;
   decisions: AgentDecisionRepository;
+  /**
+   * 銘柄解決（symbol を観測に載せるため。B2）。省略時は instrumentId をフォールバック。
+   * market-data を直接 import せず contracts の InstrumentResolver IF に依存する。
+   */
+  instruments?: InstrumentResolver;
   /** 監査 ID 生成（省略時は連番）。 */
   newId?: IdFactory;
   /** 現在時刻（テスト決定性のため注入可能）。 */
@@ -65,6 +71,7 @@ export class DefaultAgentTradingService implements IAgentTradingService {
   private readonly price: PriceProvider;
   private readonly engine: TradingEngine;
   private readonly decisions: AgentDecisionRepository;
+  private readonly instruments: InstrumentResolver | undefined;
   private readonly newId: IdFactory;
   private readonly now: () => Date;
   private readonly makeRiskGuard: RiskGuardFactory;
@@ -78,6 +85,7 @@ export class DefaultAgentTradingService implements IAgentTradingService {
     this.price = deps.priceProvider;
     this.engine = deps.tradingEngine;
     this.decisions = deps.decisions;
+    this.instruments = deps.instruments;
     this.newId = deps.newId ?? (() => `ag-${++this.seq}`);
     this.now = deps.now ?? (() => new Date());
     this.makeRiskGuard =
@@ -170,16 +178,18 @@ export class DefaultAgentTradingService implements IAgentTradingService {
     const observationPositions: AgentObservation["positions"] = [];
     const recentQuotes: AgentObservation["recentQuotes"] = [];
     for (const p of positions) {
+      // B2: InstrumentResolver があれば symbol を解決。無ければ instrumentId をフォールバック。
+      const symbol = await this.resolveSymbol(p.instrumentId);
       observationPositions.push({
         instrumentId: p.instrumentId,
-        symbol: p.instrumentId, // symbol は instrument 解決前のフォールバック。
+        symbol,
         quantity: p.quantity,
         marketPrice: p.marketPrice,
         unrealizedPnlPct: p.unrealizedPnlPct,
       });
       recentQuotes.push({
         instrumentId: p.instrumentId,
-        symbol: p.instrumentId,
+        symbol,
         last: p.marketPrice,
       });
     }
@@ -191,6 +201,17 @@ export class DefaultAgentTradingService implements IAgentTradingService {
       positions: observationPositions,
       recentQuotes,
     };
+  }
+
+  /** 銘柄 symbol を解決する（B2）。resolver 無し/未知は instrumentId を返す。 */
+  private async resolveSymbol(instrumentId: string): Promise<string> {
+    if (!this.instruments) return instrumentId;
+    try {
+      const inst = await this.instruments.getById(instrumentId);
+      return inst?.symbol ?? instrumentId;
+    } catch {
+      return instrumentId;
+    }
   }
 
   /**

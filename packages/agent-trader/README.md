@@ -12,12 +12,14 @@ LLM 呼び出しそのもの・自律ループ実行は持たない（agent-runn
     委譲し、生成 Order を `decision.resultOrderIds` にひも付けて返す。**監査証跡の無い発注を作らない**（spec §5.2）。
     空 rationale・未知 profile は拒否。`enabled=false` は発注せず decision のみ記録。
   - `buildObservation(accountId)` — `PortfolioService` の保有・サマリと時価から `AgentObservation` を組み立てる。
+    任意注入の `InstrumentResolver`（B2）で symbol を解決する（未注入時は instrumentId にフォールバック）。
 - `DefaultRiskGuard` — 暴走防止（spec §9）。`maxOrderNotional` / `maxDailyNotional`（当日累計＋本注文）/
   `maxPositionPct`（約定後集中度）/ 買い注文の現金不足を判定。CANCEL/HOLD は常に許可。
   上限未設定の項目は無効化。
 - `DefaultPerformanceEvaluator`
   - `snapshot(accountId, at)` — `at` 以前のエクイティ点のみで 累積リターン・最大DD・年率シャープ・勝率を計算
-    （**ルックアヘッド禁止**）。任意で `PerformanceSnapshotRepository` に永続化。
+    （**ルックアヘッド禁止**）。勝率は `PortfolioService.getRealizedPnl`（trade 単位。B2）で算出し、
+    実現損益が無ければエクイティ上昇比率を代理指標にフォールバック。任意で `PerformanceSnapshotRepository` に永続化。
   - `compare(accountId, benchmark, range)` — 戦略リターン（手数料込みエクイティ由来）と
     ベンチ（BUY_AND_HOLD/指数）の同条件リターンを比較し超過リターンを返す。
 

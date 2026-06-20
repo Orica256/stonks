@@ -72,6 +72,18 @@ export class DefaultPerformanceEvaluator implements IPerformanceEvaluator {
     const equities = history.map((p) => new Decimal(p.equity));
     const metrics = this.computeMetrics(equities);
 
+    // B2: 勝率は trade 単位の実現損益から計算する（PortfolioService.getRealizedPnl）。
+    // at までにクローズした取引のみ（ルックアヘッド防止）。実現損益が皆無なら
+    // エクイティ変化の up 期間比率を従来どおり代理指標として用いる。
+    const realized = (await this.portfolio.getRealizedPnl(accountId)).filter(
+      (r) => new Date(r.closedAt).getTime() <= at.getTime(),
+    );
+    const winRate =
+      realized.length > 0
+        ? realized.filter((r) => new Decimal(r.realized).gt(ZERO)).length /
+          realized.length
+        : metrics.winRate;
+
     const snapshot: PerformanceSnapshot = {
       accountId,
       ts: at.toISOString(),
@@ -81,7 +93,7 @@ export class DefaultPerformanceEvaluator implements IPerformanceEvaluator {
       cumulativeReturn: metrics.cumulativeReturn,
       maxDrawdown: metrics.maxDrawdown,
       sharpe: metrics.sharpe,
-      winRate: metrics.winRate,
+      winRate,
     };
 
     if (this.snapshots) {
