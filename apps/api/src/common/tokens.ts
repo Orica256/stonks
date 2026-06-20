@@ -18,9 +18,6 @@ export const TOKENS = {
   PortfolioService: "PORTFOLIO_SERVICE",
   PortfolioRepository: "PORTFOLIO_REPOSITORY",
 
-  /** 取引履歴の記録/参照（結線層のギャップ吸収）。 */
-  TradeLog: "TRADE_LOG",
-
   /** analytics の IndicatorService。 */
   IndicatorService: "INDICATOR_SERVICE",
 

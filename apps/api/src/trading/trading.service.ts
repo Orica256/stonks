@@ -8,13 +8,14 @@ import type {
 } from "@stonks/contracts";
 import type { StandardTradingEngine } from "@stonks/trading-engine";
 import { TOKENS } from "../common/tokens.js";
-import type { TradeLog } from "./trade-log.js";
 
 /**
  * TradingEngine の薄いアプリ層ラッパ。
  *
  * 約定が出たら portfolio.applyTrade に流す結線をここで一元化する
  * （発注・取消は委譲、評価は評価後に約定を portfolio へ反映）。
+ * 取引履歴は portfolio が applyTrade で記録するため、参照は
+ * PortfolioService.getTrades に委譲する（B2: TradeLog ブリッジを廃止）。
  */
 @Injectable()
 export class TradingService {
@@ -25,8 +26,6 @@ export class TradingService {
     private readonly portfolio: PortfolioService,
     @Inject(TOKENS.PriceProvider)
     private readonly priceProvider: PriceProvider,
-    @Inject(TOKENS.TradeLog)
-    private readonly tradeLog: TradeLog,
   ) {}
 
   placeOrder(cmd: PlaceOrderCommand): Promise<Order> {
@@ -47,13 +46,12 @@ export class TradingService {
       priceProvider: this.priceProvider,
     });
     for (const trade of trades) {
-      await this.tradeLog.record(trade);
       await this.portfolio.applyTrade(trade);
     }
     return trades;
   }
 
   listTrades(accountId: string): Promise<Trade[]> {
-    return this.tradeLog.list(accountId);
+    return this.portfolio.getTrades(accountId);
   }
 }

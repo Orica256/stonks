@@ -36,23 +36,25 @@ REST + SSE を公開する。**横依存は作らず、結合は contracts の I
 - **market-data**: `createMarketDataProvider({ env })` が env からアダプタ構成を組む
   （Finnhub/J-Quants は鍵があれば、無ければ Yahoo。FX は exchangerate.host）。返る
   `MarketDataRegistry` は MarketDataProvider / PriceProvider / FxProvider を一体で満たす。
-- **trading-engine**: `StandardTradingEngine` を `OrderRepository` / `AccountStateProvider` /
-  `InstrumentProvider` + 既定 Fee/Fill モデルで構成。`evaluateOpenOrders` は
-  `POST /orders/evaluate`・定期インターバル（`ORDER_EVAL_INTERVAL_MS`）で駆動する最小実装。
-- **約定の流し込み**: 評価で生じた `Trade` を `TradeLog` に記録し `portfolio.applyTrade` に流す。
-- **AccountStateProvider ブリッジ**: trading-engine の現金/保有読み取りを
-  `PortfolioRepository`（portfolio）にブリッジし、契約のギャップを結線層で吸収する。
+- **trading-engine**: `StandardTradingEngine` を `OrderRepository` + contracts の
+  `AccountStateProvider` / `InstrumentResolver` + 既定 Fee/Fill モデルで構成。
+  `evaluateOpenOrders` は `POST /orders/evaluate`・定期インターバル
+  （`ORDER_EVAL_INTERVAL_MS`）で駆動する最小実装。
+- **約定の流し込み**: 評価で生じた `Trade` を `portfolio.applyTrade` に流す。取引履歴は
+  portfolio が applyTrade で記録するため、`GET /accounts/:id/trades` は
+  `PortfolioService.getTrades` に委譲する（旧 `TradeLog` ブリッジは B2 で廃止）。
+- **AccountStateProvider**: trading-engine の現金/保有読み取りは portfolio の
+  `RepositoryAccountStateProvider`（contracts `AccountStateProvider` 実装）で構成する
+  （B2 で正式 IF 化。旧 `PortfolioAccountStateProvider` 結線ブリッジは廃止）。
 - **portfolio**: `DefaultPortfolioService` を `PortfolioRepository` + PriceProvider + FxProvider +
   `baseCurrency` で構成。
 - **analytics**: `IndicatorService`（純粋関数）にバーを渡して指標を計算。
 
 ### 銘柄 ID 体系（重要）
 
-market-data は `EXCHANGE:SYMBOL`（例 `TSE:7203` / `NASDAQ:AAPL`）を正準 ID とし、
-`PriceProvider.getLatestPrice` はこの形式から通貨を導出する。一方 db の
-`Instrument.id` は既定 cuid。本結線層では **`Instrument.id` に `EXCHANGE:SYMBOL` を
-格納する**前提で両者を突き合わせる（cuid の自動採番は使わない）。詳細・残課題は
-リポジトリの結線報告を参照。
+`EXCHANGE:SYMBOL`（例 `TSE:7203` / `NASDAQ:AAPL`）が `Instrument.id` の正準形式として
+contracts（`InstrumentId` / B1）で確定済み。`PriceProvider.getLatestPrice` はこの形式から
+通貨を導出し、db の `Instrument.id` も同形式をそのまま格納する（cuid 自動採番は使わない）。
 
 ## 環境変数
 

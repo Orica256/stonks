@@ -13,7 +13,6 @@ import {
   type InstrumentProvider,
   type OrderRepository,
 } from "@stonks/trading-engine";
-import { getPrisma } from "@stonks/db";
 import { TOKENS } from "../common/tokens.js";
 import type { AppConfig } from "../common/config.js";
 import { PersistenceModule } from "../persistence/persistence.module.js";
@@ -21,11 +20,6 @@ import { PortfolioModule } from "../portfolio/portfolio.module.js";
 import { MarketDataModule } from "../market-data/market-data.module.js";
 import { TradingService } from "./trading.service.js";
 import { OrdersController } from "./orders.controller.js";
-import {
-  InMemoryTradeLog,
-  PrismaTradeLog,
-  type TradeLog,
-} from "./trade-log.js";
 
 /**
  * オープン注文の定期評価ループ（任意。ORDER_EVAL_INTERVAL_MS > 0 で有効）。
@@ -86,17 +80,9 @@ class OrderEvaluationScheduler
           fillModel: new SlippageFillModel(),
         }),
     },
-    {
-      provide: TOKENS.TradeLog,
-      inject: [TOKENS.AppConfig],
-      useFactory: (config: AppConfig): TradeLog =>
-        config.useDatabase
-          ? new PrismaTradeLog(getPrisma())
-          : new InMemoryTradeLog(),
-    },
     TradingService,
     OrderEvaluationScheduler,
   ],
-  exports: [TradingService, TOKENS.TradingEngine, TOKENS.TradeLog],
+  exports: [TradingService, TOKENS.TradingEngine],
 })
 export class TradingModule {}
