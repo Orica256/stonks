@@ -1,6 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
-import { ApiClient } from "./api-client.js";
+import type { z } from "zod";
 import { ApiError } from "./api-client.js";
 import {
   CancelOrderInput,
@@ -53,11 +52,6 @@ const wrap =
       return fail(err);
     }
   };
-
-export interface CreateServerOptions {
-  deps: ToolDeps;
-  api: ApiClient;
-}
 
 /**
  * MCP ツールサーバーを構築する（spec §6.7）。apps/api(HTTP) の薄いラッパとして

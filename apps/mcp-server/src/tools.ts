@@ -12,7 +12,7 @@ import {
   PositionView,
   Quote,
 } from "@stonks/contracts";
-import { ApiClient } from "./api-client.js";
+import type { ApiClient } from "./api-client.js";
 
 /**
  * MCP ツールの入出力スキーマとハンドラ（spec §6.7）。
