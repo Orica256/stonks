@@ -1,13 +1,17 @@
 import type { Currency, Exchange, Market } from "@stonks/contracts";
-import { DomainError } from "@stonks/contracts";
+import {
+  DomainError,
+  buildInstrumentId as buildId,
+  parseInstrumentId as parseId,
+} from "@stonks/contracts";
 
 /**
  * 銘柄コードの正規化（spec §2.1, §6.1）。
  *
- * contracts の `Instrument.id` はプロバイダ非依存の不透明 ID だが、
- * market-data 層では `EXCHANGE:SYMBOL`（例 `TSE:7203` / `NASDAQ:AAPL`）を
- * 正準形式として採用する。各アダプタはここからプロバイダ固有コード
- * （Yahoo の `7203.T`、Finnhub の `AAPL` 等）へ変換する。
+ * 銘柄 ID の正準形式 `EXCHANGE:SYMBOL`（例 `TSE:7203` / `NASDAQ:AAPL`）は
+ * contracts（B1）で確定済み。組み立て/分解は contracts の helper を再利用し、
+ * ここでは market-data 固有の market/currency 導出とプロバイダ固有コード変換
+ * （Yahoo の `7203.T`、Finnhub の `AAPL` 等）を担う。
  */
 export interface ParsedInstrumentId {
   exchange: Exchange;
@@ -35,22 +39,24 @@ const YAHOO_SUFFIX: Record<Exchange, string> = {
 };
 
 export const buildInstrumentId = (exchange: Exchange, symbol: string): string =>
-  `${exchange}:${symbol.toUpperCase()}`;
+  buildId(exchange, symbol);
 
-/** `EXCHANGE:SYMBOL` をパースする。未知形式は VALIDATION エラー。 */
+/**
+ * `EXCHANGE:SYMBOL` を market/currency 込みでパースする。未知形式は VALIDATION エラー。
+ * 形式判定は contracts の parseInstrumentId に委譲し、市場/通貨を導出する。
+ */
 export const parseInstrumentId = (instrumentId: string): ParsedInstrumentId => {
-  const [exchange, symbol] = instrumentId.split(":");
-  if (!exchange || !symbol || !(exchange in EXCHANGE_MARKET)) {
+  const parsed = parseId(instrumentId);
+  if (!parsed) {
     throw new DomainError(
       "VALIDATION",
       `invalid instrumentId: "${instrumentId}" (expected EXCHANGE:SYMBOL)`,
     );
   }
-  const ex = exchange as Exchange;
-  const market = EXCHANGE_MARKET[ex];
+  const market = EXCHANGE_MARKET[parsed.exchange];
   return {
-    exchange: ex,
-    symbol: symbol.toUpperCase(),
+    exchange: parsed.exchange,
+    symbol: parsed.symbol.toUpperCase(),
     market,
     currency: MARKET_CURRENCY[market],
   };
