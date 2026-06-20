@@ -21,7 +21,7 @@ import type {
   InstrumentProvider,
   OrderRepository,
 } from "./ports.js";
-import { SlippageFillModel } from "./fill-model.js";
+import type { SlippageFillModel } from "./fill-model.js";
 import {
   annualRateForSide,
   computeInterestAccrual,

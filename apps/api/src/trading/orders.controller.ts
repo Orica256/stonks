@@ -12,6 +12,8 @@ import {
   PlaceOrderCommand,
   type Trade,
 } from "@stonks/contracts";
+// NestJS の DI は実行時にクラス参照を要する（reflect-metadata）。`import type` 化禁止。
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import { TradingService } from "./trading.service.js";
 
 /**

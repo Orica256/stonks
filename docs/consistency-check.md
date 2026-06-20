@@ -6,7 +6,7 @@
 
 ```bash
 pnpm check:consistency      # 横断整合性チェックのみ（node scripts/check-consistency.mjs）
-pnpm verify                 # db:generate → typecheck → test → check:consistency（全ゲート）
+pnpm verify                 # generate → typecheck → lint → test → check:consistency（全ゲート）
 ```
 
 CI では `.github/workflows/ci.yml` が push / PR ごとに `pnpm verify` を実行する。`ERROR` が 1 件でもあれば終了コード 1（ゲート不合格）。`WARNING` は合格を維持する（情報通知）。

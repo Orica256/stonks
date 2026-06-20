@@ -18,7 +18,7 @@
     "db:migrate": "pnpm --filter @stonks/db migrate",
     "format": "prettier --write \"**/*.{ts,tsx,md,json}\"",
     "check:consistency": "node scripts/check-consistency.mjs",
-    "verify": "corepack pnpm@9.12.0 -r generate && corepack pnpm@9.12.0 -r typecheck && corepack pnpm@9.12.0 -r test && node scripts/check-consistency.mjs"
+    "verify": "corepack pnpm@9.12.0 -r generate && corepack pnpm@9.12.0 -r typecheck && corepack pnpm@9.12.0 -r lint && corepack pnpm@9.12.0 -r test && node scripts/check-consistency.mjs"
   },
   "devDependencies": {
     "prettier": "^3.3.3",

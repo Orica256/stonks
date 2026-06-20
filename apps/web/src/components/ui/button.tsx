@@ -22,7 +22,6 @@ export function Button({
 }: ButtonProps): JSX.Element {
   return (
     <button
-      // eslint-disable-next-line react/button-has-type
       type={type}
       className={cn(
         "inline-flex items-center justify-center rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
