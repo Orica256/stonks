@@ -5,6 +5,7 @@ import type {
   EquityPoint,
   Position,
   RealizedPnl,
+  Trade,
 } from "@stonks/contracts";
 import type { PortfolioRepository } from "./repository.js";
 
@@ -22,6 +23,7 @@ export class InMemoryPortfolioRepository implements PortfolioRepository {
   private readonly cash = new Map<string, CashBalance>();
   private readonly ledger = new Map<string, CashLedgerEntry[]>();
   private readonly realized = new Map<string, RealizedPnl[]>();
+  private readonly trades = new Map<string, Trade[]>();
   private readonly equity = new Map<string, EquityPoint[]>();
 
   async getPosition(
@@ -78,6 +80,16 @@ export class InMemoryPortfolioRepository implements PortfolioRepository {
 
   async listRealizedPnl(accountId: string): Promise<RealizedPnl[]> {
     return [...(this.realized.get(accountId) ?? [])];
+  }
+
+  async appendTrade(trade: Trade): Promise<void> {
+    const list = this.trades.get(trade.accountId) ?? [];
+    list.push({ ...trade });
+    this.trades.set(trade.accountId, list);
+  }
+
+  async listTrades(accountId: string): Promise<Trade[]> {
+    return [...(this.trades.get(accountId) ?? [])];
   }
 
   async appendEquityPoint(

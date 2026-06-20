@@ -11,7 +11,7 @@
 ## 設計上の制約（厳守）
 - **価格は `PriceProvider` IF 経由のみ**。`market-data` を直接 import しない（spec §4.3・§6.2）。
 - **金額は浮動小数禁止**。`@stonks/core-domain` の `Money`（decimal.js）で計算（CLAUDE.md §0）。
-- **永続化は db に直接依存しない**。内部ポート（`OrderRepository` / `AccountStateProvider` / `InstrumentProvider`）に対して DI し、in-memory 実装を同梱（実 DB / `PortfolioService` 結線は Phase 2）。
+- **永続化は db に直接依存しない**。内部ポート `OrderRepository` と contracts の `AccountStateProvider` / `InstrumentResolver`（B2。`InstrumentProvider` は後者の別名）に対して DI し、in-memory 実装を同梱（実 DB / portfolio 結線は apps/api 側）。
 
 ## 不変条件
 - `filledQuantity <= quantity`、`FILLED` は `filledQuantity == quantity`。

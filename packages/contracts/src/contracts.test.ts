@@ -4,6 +4,9 @@ import {
   PlaceOrderCommand,
   AgentDecision,
   Instrument,
+  InstrumentId,
+  buildInstrumentId,
+  parseInstrumentId,
 } from "./index.js";
 
 describe("Money schema", () => {
@@ -76,10 +79,29 @@ describe("AgentDecision schema (audit trail invariant)", () => {
   });
 });
 
+describe("InstrumentId canonical form (B1)", () => {
+  it("accepts EXCHANGE:SYMBOL, rejects bare/unknown", () => {
+    expect(InstrumentId.safeParse("TSE:7203").success).toBe(true);
+    expect(InstrumentId.safeParse("NASDAQ:AAPL").success).toBe(true);
+    expect(InstrumentId.safeParse("AAPL").success).toBe(false);
+    expect(InstrumentId.safeParse("LSE:VOD").success).toBe(false);
+  });
+
+  it("build/parse round-trips and upper-cases the symbol", () => {
+    expect(buildInstrumentId("NASDAQ", "aapl")).toBe("NASDAQ:AAPL");
+    expect(parseInstrumentId("TSE:7203")).toEqual({
+      exchange: "TSE",
+      symbol: "7203",
+    });
+    expect(parseInstrumentId("nonsense")).toBeNull();
+    expect(parseInstrumentId("LSE:VOD")).toBeNull();
+  });
+});
+
 describe("Instrument schema", () => {
   it("defaults tickRules and isActive", () => {
     const r = Instrument.parse({
-      id: "i1",
+      id: "TSE:7203",
       symbol: "7203",
       exchange: "TSE",
       market: "JP",

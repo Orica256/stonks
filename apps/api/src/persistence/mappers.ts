@@ -9,6 +9,7 @@ import type {
   Position,
   RealizedPnl,
   TickRule,
+  Trade,
 } from "@stonks/contracts";
 
 /**
@@ -78,7 +79,21 @@ export const toPosition = (
   side: row.side,
   quantity: row.quantity,
   avgCost: row.avgCost.toString(),
+  currency: row.currency, // B3: 建玉通貨
   openedAt: row.openedAt.toISOString(),
+});
+
+export const toTrade = (row: Prisma.TradeGetPayload<object>): Trade => ({
+  id: row.id,
+  orderId: row.orderId,
+  accountId: row.accountId,
+  instrumentId: row.instrumentId,
+  side: row.side,
+  quantity: row.quantity,
+  price: row.price.toString(),
+  fee: row.fee.toString(),
+  currency: row.currency,
+  executedAt: row.executedAt.toISOString(),
 });
 
 export const toCashBalance = (

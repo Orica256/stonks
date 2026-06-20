@@ -99,7 +99,9 @@ enum AgentMode {
 
 // ── マーケットデータ ──
 model Instrument {
-  id        String         @id @default(cuid())
+  // 正準形式 `EXCHANGE:SYMBOL`（例 `TSE:7203` / `NASDAQ:AAPL`。contracts InstrumentId / B1）。
+  // プロバイダ非依存の安定キーとして market-data / apps/api と共有するため cuid 既定は使わない。
+  id        String         @id
   symbol    String
   exchange  Exchange
   market    Market
@@ -211,6 +213,7 @@ model Position {
   side         PositionSide @default(LONG)
   quantity     Float
   avgCost      Decimal
+  currency     Currency // 建玉の取引通貨（B3: 自己記述的にし換算で参照する）
   openedAt     DateTime     @default(now())
 
   account    Account    @relation(fields: [accountId], references: [id])

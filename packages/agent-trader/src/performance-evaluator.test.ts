@@ -74,6 +74,55 @@ describe("PerformanceEvaluator.snapshot", () => {
     expect(snap.winRate).toBe(0);
   });
 
+  it("実現損益があれば勝率は trade 単位で計算する（B2）", async () => {
+    // エクイティ変化の up 比率は 2/3 だが、realized は 3 件中 1 件のみ勝ち → 1/3。
+    const portfolio = new FakePortfolioService({
+      summary: summary("120"),
+      history: points([100, 110, 90, 120]),
+      realizedPnl: [
+        {
+          id: "r1",
+          accountId: "acc",
+          instrumentId: "i-1",
+          quantity: 1,
+          costBasis: "100",
+          proceeds: "150",
+          realized: "50",
+          currency: "JPY",
+          closedAt: new Date(Date.UTC(2026, 0, 2)).toISOString(),
+        },
+        {
+          id: "r2",
+          accountId: "acc",
+          instrumentId: "i-1",
+          quantity: 1,
+          costBasis: "100",
+          proceeds: "80",
+          realized: "-20",
+          currency: "JPY",
+          closedAt: new Date(Date.UTC(2026, 0, 3)).toISOString(),
+        },
+        {
+          id: "r3",
+          accountId: "acc",
+          instrumentId: "i-1",
+          quantity: 1,
+          costBasis: "100",
+          proceeds: "90",
+          realized: "-10",
+          currency: "JPY",
+          closedAt: new Date(Date.UTC(2026, 0, 4)).toISOString(),
+        },
+      ],
+    });
+    const evaluator = new DefaultPerformanceEvaluator({
+      portfolio,
+      priceProvider: new FakePriceProvider({}),
+    });
+    const snap = await evaluator.snapshot("acc", new Date("2026-12-31T00:00:00Z"));
+    expect(snap.winRate).toBeCloseTo(1 / 3, 10);
+  });
+
   it("snapshots IF を渡すと永続化する", async () => {
     const snaps = new InMemoryPerformanceSnapshotRepository();
     const portfolio = new FakePortfolioService({

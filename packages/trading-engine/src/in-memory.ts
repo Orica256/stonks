@@ -1,4 +1,4 @@
-import type { Instrument, Order } from "@stonks/contracts";
+import type { Currency, Instrument, Order } from "@stonks/contracts";
 import type {
   AccountStateProvider,
   InstrumentProvider,
@@ -49,7 +49,7 @@ export class InMemoryAccountStateProvider implements AccountStateProvider {
   private readonly cash = new Map<string, string>(); // `${accountId}:${currency}` -> amount
   private readonly positions = new Map<string, number>(); // `${accountId}:${instrumentId}` -> qty
 
-  setCash(accountId: string, currency: string, amount: string): void {
+  setCash(accountId: string, currency: Currency, amount: string): void {
     this.cash.set(`${accountId}:${currency}`, amount);
   }
 
@@ -57,7 +57,7 @@ export class InMemoryAccountStateProvider implements AccountStateProvider {
     this.positions.set(`${accountId}:${instrumentId}`, quantity);
   }
 
-  async getAvailableCash(accountId: string, currency: string): Promise<string> {
+  async getAvailableCash(accountId: string, currency: Currency): Promise<string> {
     return this.cash.get(`${accountId}:${currency}`) ?? "0";
   }
 

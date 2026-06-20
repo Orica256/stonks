@@ -5,6 +5,7 @@ import type {
   EquityPoint,
   Position,
   RealizedPnl,
+  Trade,
 } from "@stonks/contracts";
 import type { PortfolioRepository } from "@stonks/portfolio";
 import type { PrismaClient } from "@stonks/db";
@@ -13,6 +14,7 @@ import {
   toLedgerEntry,
   toPosition,
   toRealizedPnl,
+  toTrade,
 } from "./mappers.js";
 
 /**
@@ -59,11 +61,13 @@ export class PrismaPortfolioRepository implements PortfolioRepository {
         side: "LONG",
         quantity: position.quantity,
         avgCost: position.avgCost,
+        currency: position.currency,
         openedAt: new Date(position.openedAt),
       },
       update: {
         quantity: position.quantity,
         avgCost: position.avgCost,
+        currency: position.currency,
       },
     });
   }
@@ -150,6 +154,31 @@ export class PrismaPortfolioRepository implements PortfolioRepository {
       orderBy: { closedAt: "asc" },
     });
     return rows.map(toRealizedPnl);
+  }
+
+  async appendTrade(trade: Trade): Promise<void> {
+    await this.db.trade.create({
+      data: {
+        id: trade.id,
+        orderId: trade.orderId,
+        accountId: trade.accountId,
+        instrumentId: trade.instrumentId,
+        side: trade.side,
+        quantity: trade.quantity,
+        price: trade.price,
+        fee: trade.fee,
+        currency: trade.currency,
+        executedAt: new Date(trade.executedAt),
+      },
+    });
+  }
+
+  async listTrades(accountId: string): Promise<Trade[]> {
+    const rows = await this.db.trade.findMany({
+      where: { accountId },
+      orderBy: { executedAt: "asc" },
+    });
+    return rows.map(toTrade);
   }
 
   async appendEquityPoint(
