@@ -21,6 +21,13 @@ export const TOKENS = {
   /** analytics の IndicatorService。 */
   IndicatorService: "INDICATOR_SERVICE",
 
+  /** agent-trader の AgentTradingService / PerformanceEvaluator と内部 IF。 */
+  AgentTradingService: "AGENT_TRADING_SERVICE",
+  PerformanceEvaluator: "PERFORMANCE_EVALUATOR",
+  AgentProfileStore: "AGENT_PROFILE_STORE",
+  AgentDecisionRepository: "AGENT_DECISION_REPOSITORY",
+  PerformanceSnapshotRepository: "PERFORMANCE_SNAPSHOT_REPOSITORY",
+
   /** アプリ設定。 */
   AppConfig: "APP_CONFIG",
 } as const;

@@ -5,6 +5,7 @@ import { MarketDataModule } from "./market-data/market-data.module.js";
 import { PortfolioModule } from "./portfolio/portfolio.module.js";
 import { TradingModule } from "./trading/trading.module.js";
 import { AnalyticsModule } from "./analytics/analytics.module.js";
+import { AgentModule } from "./agent/agent.module.js";
 
 /**
  * apps/api ルートモジュール。各ドメインモジュールを DI でマウントする（spec §4.1）。
@@ -18,6 +19,7 @@ import { AnalyticsModule } from "./analytics/analytics.module.js";
     PortfolioModule,
     TradingModule,
     AnalyticsModule,
+    AgentModule,
   ],
 })
 export class AppModule {}

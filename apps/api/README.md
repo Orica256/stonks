@@ -27,9 +27,16 @@ REST + SSE を公開する。**横依存は作らず、結合は contracts の I
 | GET | `/accounts/:id/summary` | 総資産サマリ |
 | GET | `/accounts/:id/history?from=&to=` | エクイティ推移 |
 | POST | `/instruments/:id/indicators` | バー取得→テクニカル指標計算 |
+| POST | `/agents` | AgentProfile 作成（id/createdAt はサーバ採番） |
+| POST | `/accounts/:id/agent-decisions` | AI 発注（`rationale` 必須 → AgentDecision 記録＋発注委譲） |
+| GET | `/accounts/:id/decisions` | 意思決定ログ閲覧（監査証跡） |
+| GET | `/accounts/:id/observation` | 自律ループ向け観測（市況/保有/成績の要約） |
+| GET | `/accounts/:id/performance?range=&from=&to=&benchmark=` | 成績スナップショット＋ベンチ比較 |
 
-> agent-decisions / performance / backtests（spec §6.8 の AI・バックテスト系）は
-> Phase 2/3 で agent-trader / backtest を投入する際に追加する。
+> agent 系は agent-trader（`AgentTradingService` / `PerformanceEvaluator`）へ委譲し、
+> trading-engine / portfolio を直接呼ばない（spec §4.3 / §8）。`agent-decisions` は
+> rationale 必須で、発注は必ず AgentDecision に紐づく（spec §5.2 監査証跡）。
+> backtests（spec §6.8）は Phase 3 で backtest を投入する際に追加する。
 
 ## 結線の要点
 
