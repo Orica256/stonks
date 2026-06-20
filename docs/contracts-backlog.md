@@ -6,25 +6,27 @@
 
 ## 優先度高（複数モジュールが回避策で凌いでいる＝早く正式化したい）
 
-### B1. 銘柄 ID 体系の正準化 `EXCHANGE:SYMBOL`
+### B1. 銘柄 ID 体系の正準化 `EXCHANGE:SYMBOL` ✅ 対応済み
 - market-data は銘柄を `EXCHANGE:SYMBOL`（例 `TSE:7203`, `NASDAQ:AAPL`）で識別・通貨導出している。
 - 一方 `db` の `Instrument.id` は `cuid()` 既定。apps/api は突き合わせのため **`Instrument.id` に `EXCHANGE:SYMBOL` を格納**する前提で結線（cuid 不使用）。
-- → contracts/db で「`Instrument.id` の正準形式」を確定する（`EXCHANGE:SYMBOL` を正式採用するか、別途 `instrumentKey` を設けるか）。trading-engine・portfolio・agent-trader すべてに影響。
+- → 対応済み: contracts に `InstrumentId`（`^(TSE|NYSE|NASDAQ):…$` の Zod スキーマ）＋ `buildInstrumentId`/`parseInstrumentId` helper を追加し、`Instrument.id` の正準形式として正式採用。db の `Instrument.id` は cuid 既定を外し正準キーをそのまま格納。market-data の symbols.ts は contracts の helper に委譲し二重定義を解消（参照系の instrumentId フィールドは既存フィクスチャ互換のため `Id` のまま）。
 
-### B2. 読み取り系インターフェースが contracts に無い
+### B2. 読み取り系インターフェースが contracts に無い ✅ 対応済み
 複数モジュールが内部ポートを発明して凌いでいる。contracts に正式な読み取り IF を定義したい:
 - **現金/保有の読み取り**: trading-engine が `AccountStateProvider`（内部）で発注前チェック。apps/api が portfolio へブリッジ。
 - **取引履歴の一覧**: `PortfolioService` に無く、apps/api が `TradeLog`（内部）を用意。
 - **実現損益（trade 単位）一覧**: agent-trader の勝率計算に必要だが無く、エクイティ系列の上昇比率で代理。
 - **銘柄解決（symbol/通貨）**: agent-trader の `AgentObservation.positions[].symbol` が取れず `instrumentId` でフォールバック。portfolio も内部に instrument→currency マップを保持。
+- → 対応済み: contracts に `AccountStateProvider`・`InstrumentResolver` を正式 IF 化し、`PortfolioService` に `getTrades` / `getRealizedPnl` を追加。trading-engine は内部 `AccountStateProvider`/`InstrumentProvider` を contracts の IF に置換（後者は `InstrumentResolver` 別名）。portfolio は applyTrade で Trade を記録し getTrades で公開、`RepositoryAccountStateProvider` を提供。agent-trader は `InstrumentResolver`（任意注入）で symbol 解決、勝率を `getRealizedPnl` の trade 単位で算出。apps/api は内部 `TradeLog`・`PortfolioAccountStateProvider` ブリッジを削除。
 
-### B3. `Position.currency` フィールド追加
+### B3. `Position.currency` フィールド追加 ✅ 対応済み
 - `PositionView.marketValue`/`unrealizedPnl` は `Money`（通貨付き）だが、`Position` は `avgCost: DecimalString` のみで通貨を持たない。
 - portfolio は内部 instrument→currency マップで回避中。`Position` に `currency: Currency` を持たせれば自己記述的になり回避策が消える。
+- → 対応済み: contracts `Position` に `currency: Currency` を追加、db `Position.currency` 列を追加。portfolio は内部 `instrumentCurrency` マップを撤去し、建玉通貨を `Position.currency` から参照（換算・スナップショット）。
 
-### B4. 入出金（deposit/withdraw）の責務
+### B4. 入出金（deposit/withdraw）の責務 ✅ 対応済み
 - `applyTrade` で現金=台帳整合を保つには現金の出所が要る。portfolio は契約外の具象 `deposit()` を追加して凌いでいる。
-- → 入出金を `PortfolioService`（または口座/現金サービス）として契約に明示する。
+- → 対応済み: `PortfolioService` に `deposit(accountId, amount, at?)` / `withdraw(accountId, amount, at?)` を IF として明示。portfolio は両者を CashLedger(DEPOSIT/WITHDRAW) と整合更新し、出金は残高不足を `DomainError("INSUFFICIENT_FUNDS")` で拒否。
 
 ## 優先度中
 
