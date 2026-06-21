@@ -17,12 +17,18 @@
 | `/portfolio` | 総資産サマリ＋保有ポジション（評価額・含み損益） |
 | `/history` | 取引履歴（約定一覧） |
 | `/analysis` | 高度チャート（複数銘柄の正規化リターン比較・騰落率ヒートマップ・描画ツール） |
+| `/backtest` | バックテスト（戦略プリセット・期間・初期資金を指定し `POST /backtests` を実行、成績指標＋エクイティカーブを表示） |
 | `/agent` | AI エージェント成績（累積リターン/最大DD/シャープ/勝率・ベンチ比較）＋意思決定ログ（監査証跡） |
 
 ## 構成
 
 - `src/lib/api/` — 型付き HTTP クライアント（`client.ts`）、エンドポイント（`endpoints.ts`）、TanStack Query フック（`hooks.ts`）、SSE 気配ストリーム（`quote-stream.ts`）。
-- `src/features/` — 機能別 UI（instruments / chart / order / analysis）。
+- `src/features/` — 機能別 UI（instruments / chart / order / analysis / backtest）。
+- `src/features/backtest/` — バックテスト画面。対象銘柄・期間・初期資金・戦略プリセットから
+  contracts の `RunBacktestRequest` を組み立て `POST /backtests`（`useRunBacktest`）を実行する。
+  戦略は数個のプリセット（SMA クロス等。`lib/strategy.ts`、`when` は backtest 評価器の対応構文のみ）に限定。
+  結果の整形・エクイティカーブ座標変換は純粋関数 `lib/equity.ts`（Vitest 対象）に分離し、
+  描画（`equity-chart.tsx`）は lightweight-charts を `dynamic(ssr:false)` で読み込む。
 - `src/features/analysis/` — 分析タブ。複数銘柄比較・ヒートマップ・**描画ツール**。
   描画ツールは単一銘柄のローソク足（既存 §6.8 `GET /instruments/:id/bars` を再利用）上に、
   クリックで**水平線（価格ライン）**と**トレンドライン（2 点の線分）**を追加・削除する

@@ -9,6 +9,7 @@ const LINKS = [
   { href: "/portfolio", label: "ポートフォリオ" },
   { href: "/history", label: "取引履歴" },
   { href: "/analysis", label: "分析" },
+  { href: "/backtest", label: "バックテスト" },
   { href: "/agent", label: "AI エージェント" },
 ];
 
