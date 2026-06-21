@@ -19,9 +19,13 @@ export type {
 export { DefaultRiskGuard } from "./risk-guard.js";
 export type { RiskGuardDeps, RiskState } from "./risk-guard.js";
 
-export { DefaultPerformanceEvaluator } from "./performance-evaluator.js";
+export {
+  DefaultPerformanceEvaluator,
+  BenchmarkUnavailableError,
+} from "./performance-evaluator.js";
 export type {
   BenchmarkConfig,
+  BenchmarkUnavailableReason,
   PerformanceEvaluatorDeps,
 } from "./performance-evaluator.js";
 
