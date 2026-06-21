@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import * as M from "./money.js";
 import { isValidLot, roundToTick, tickSizeFor } from "./tick.js";
 import { isMarketOpen } from "./market-calendar.js";
+import {
+  DEFAULT_CAPITAL_GAINS_TAX_RATE,
+  estimateCapitalGainsTax,
+} from "./tax.js";
 import type { Instrument } from "@stonks/contracts";
 
 describe("Money arithmetic (no float drift)", () => {
@@ -58,5 +62,23 @@ describe("market calendar", () => {
   it("US open at weekday 10:00 ET", () => {
     // 2026-06-19 14:00 UTC = 10:00 EDT.
     expect(isMarketOpen("US", new Date("2026-06-19T14:00:00Z"))).toBe(true);
+  });
+});
+
+describe("capital gains tax estimate (概算・浮動小数禁止)", () => {
+  it("applies the default 20.315% rate to a gain", () => {
+    expect(DEFAULT_CAPITAL_GAINS_TAX_RATE).toBe("0.20315");
+    // 100000 × 0.20315 = 20315（浮動小数の誤差なく一致）。
+    expect(estimateCapitalGainsTax("100000")).toBe("20315");
+  });
+
+  it("treats losses as zero tax (損失は税額に反映しない)", () => {
+    expect(estimateCapitalGainsTax("-50000")).toBe("0");
+    expect(estimateCapitalGainsTax("0")).toBe("0");
+  });
+
+  it("accepts a substituted rate (NISA 非課税 = 0)", () => {
+    expect(estimateCapitalGainsTax("100000", "0")).toBe("0");
+    expect(estimateCapitalGainsTax("100000", "0.15")).toBe("15000");
   });
 });

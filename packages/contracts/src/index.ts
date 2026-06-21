@@ -12,6 +12,7 @@ export * from "./trade.js";
 export * from "./ledger.js";
 export * from "./margin.js";
 export * from "./tax-lot.js";
+export * from "./tax.js";
 export * from "./portfolio.js";
 export * from "./trading-engine.js";
 export * from "./analytics.js";

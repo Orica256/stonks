@@ -5,3 +5,4 @@
 export * as Money from "./money.js";
 export * from "./tick.js";
 export * from "./market-calendar.js";
+export * from "./tax.js";
