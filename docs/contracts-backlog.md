@@ -78,6 +78,55 @@
     portfolio 実装の範囲で詰める。spec とは矛盾なし（spec §5.1 の TaxLot 定義に `remainingQuantity` を
     実務上追加したのみ。spec 側の TaxLot 行に残数量の含意を補記する余地あり＝**spec 更新提案候補**）。
 
+## Phase 3 契約: 譲渡益課税の概算（capital gains tax estimate）✅ 反映済み
+
+> spec §2.3 P1「税計算（譲渡益課税の概算）」の契約を `domain-architect` が確定。
+> **概算**（確定申告の正確計算ではない。CLAUDE.md §7 免責の範囲）であることを型・命名・
+> ドキュメントで明示。後続の portfolio（実現益からの税概算集計）実装の前提。
+> **すべて追加的・後方互換**（既存の現物/Phase 2 の全テストを壊さない。新フィールド/メソッドは
+> optional/default のみ）。
+
+### 追加した型/定数/IF
+- `packages/contracts/tax.ts`（新規）:
+  - `DEFAULT_CAPITAL_GAINS_TAX_RATE = "0.20315"`（= 所得税15% + 復興特別所得税0.315% + 住民税5%。
+    日本株の申告分離課税の既定概算率。`Rate`=DecimalString として持つ。**口座区分/通貨で差し替え可**）。
+  - `CapitalGainsTaxEstimate`(Zod): `{ accountId, range(DateRange), currency(Currency),
+    realizedGains: DecimalString, taxRate: Rate, estimatedTax: DecimalString }`。
+    通貨別に 1 件返す想定。`estimatedTax = max(realizedGains, 0) × taxRate`（常に 0 以上）。
+    **損失は通算せず税額 0**（益のみ課税対象とみなす簡略方針）。型 JSDoc に簡略点を明記。
+- `packages/core-domain/tax.ts`（新規）:
+  - `estimateCapitalGainsTax(realizedGains, taxRate?=DEFAULT...)`: decimal.js で概算税額を算出する
+    純関数（浮動小数禁止）。損失は 0。`DEFAULT_CAPITAL_GAINS_TAX_RATE` を再エクスポート。
+- IF（最小・後方互換）:
+  - `PortfolioService.estimateCapitalGainsTax?(accountId, range): Promise<CapitalGainsTaxEstimate[]>`
+    （**optional メソッド**。既存実装/フェイクを壊さないため任意。portfolio 実装後に必須化を検討）。
+
+### DB（`packages/db`）
+- **変更なし**（新テーブル不要）。概算は既存 `RealizedPnl` から計算で導出する。税率を口座属性として
+  永続化する要件は現状なし（既定率＋設定差し替えで足りる）。将来 NISA 等を口座単位で精密に持つ必要が
+  出たら、`Account` に最小列を足すか別途検討（過剰設計しない）。
+
+### 後続実装担当への申し送り（portfolio）
+- `estimateCapitalGainsTax(accountId, range)` を実装する:
+  - `getRealizedPnl(accountId)` の結果を `range`（from/to。UTC、`closedAt` で絞る）で抽出し、
+    **通貨ごと**に `realized` を合算 → 通貨別 `realizedGains` を得る。
+  - 税額は core-domain の `estimateCapitalGainsTax(realizedGains, rate)` を使う（自前で率計算しない）。
+    既定率は `DEFAULT_CAPITAL_GAINS_TAX_RATE`。設定で率を差し替えられる導線を用意（口座属性 or 設定値）。
+  - 通貨別に `CapitalGainsTaxEstimate` を組んで配列で返す（対象期間に実現益がない通貨は省略 or
+    realizedGains="0"/estimatedTax="0" で返すかは実装方針として一貫させる）。
+  - **損益通算は概算では行わない**（損失通貨は税額 0）。複数銘柄/期間の通算・繰越控除は概算スコープ外。
+  - 税ロット（`RealizedPnlWithLots`）との接続（method 別の取得費算定）を使うかは任意。概算は
+    `RealizedPnl.realized` の符号で十分（method の精密さは概算には不要）。
+  - 概算税を実際に現金へ反映する場合は `CashLedgerEntry(TAX)` を起こす（反映タイミング=確定/期末などは
+    portfolio/api で決める。本契約は「概算の表示・取得」までで、課税の現金反映は強制しない）。
+- 実装後、optional を必須メソッドへ昇格するか domain-architect と調整。
+
+### spec 更新提案
+- spec §10（未決事項）に **税の確定方針が無い**。本タスクで以下を既定として導入したので spec へ追記提案:
+  「譲渡益課税は **概算**（実現益×概算率）で表示する。既定率は **20.315%**（所得税15%+復興0.315%+住民5%）
+  とし、**設定で差し替え可能**。損益通算・繰越控除・各特例は概算では行わない（益のみ課税対象の簡略）。
+  確定申告の正確計算はスコープ外（CLAUDE.md §7 免責）。」 spec §2.3 P1 の文言とは矛盾なし（補強のみ）。
+
 ## 優先度高（複数モジュールが回避策で凌いでいる＝早く正式化したい）
 
 ### B1. 銘柄 ID 体系の正準化 `EXCHANGE:SYMBOL` ✅ 対応済み
