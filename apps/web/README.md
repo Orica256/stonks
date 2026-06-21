@@ -16,13 +16,18 @@
 | `/` | トレード（銘柄検索＋気配＋ローソク足チャート＋注文入力） |
 | `/portfolio` | 総資産サマリ＋保有ポジション（評価額・含み損益） |
 | `/history` | 取引履歴（約定一覧） |
-| `/analysis` | 高度チャート（複数銘柄の正規化リターン比較・騰落率ヒートマップ・描画ツール枠） |
+| `/analysis` | 高度チャート（複数銘柄の正規化リターン比較・騰落率ヒートマップ・描画ツール） |
 | `/agent` | AI エージェント成績（累積リターン/最大DD/シャープ/勝率・ベンチ比較）＋意思決定ログ（監査証跡） |
 
 ## 構成
 
 - `src/lib/api/` — 型付き HTTP クライアント（`client.ts`）、エンドポイント（`endpoints.ts`）、TanStack Query フック（`hooks.ts`）、SSE 気配ストリーム（`quote-stream.ts`）。
-- `src/features/` — 機能別 UI（instruments / chart / order）。
+- `src/features/` — 機能別 UI（instruments / chart / order / analysis）。
+- `src/features/analysis/` — 分析タブ。複数銘柄比較・ヒートマップ・**描画ツール**。
+  描画ツールは単一銘柄のローソク足（既存 §6.8 `GET /instruments/:id/bars` を再利用）上に、
+  クリックで**水平線（価格ライン）**と**トレンドライン（2 点の線分）**を追加・削除する
+  クライアント完結の簡易作図。作図状態は Zustand（`drawing-store.ts`）、点管理・座標補間などの
+  純粋ロジックは `lib/drawing.ts`（Vitest 対象）に分離。lightweight-charts は `dynamic(ssr:false)` で読み込む。
 - `src/components/` — 共通 UI（Card・状態表示・ナビ・免責）。
 - `src/stores/` — Zustand（選択銘柄）。
 - `src/lib/format.ts` — 表示整形（金額は DecimalString を Intl で表示のみ。演算しない）。
