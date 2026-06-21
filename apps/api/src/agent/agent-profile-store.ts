@@ -13,6 +13,8 @@ import type { Prisma, PrismaClient } from "@stonks/db";
 export interface AgentProfileStore extends AgentProfileProvider {
   /** 完成済みの AgentProfile（id/createdAt 確定済み）を保存する。 */
   create(profile: AgentProfile): Promise<AgentProfile>;
+  /** 登録済みの AgentProfile を一覧する（agent-runner がプロファイルを権威として取るため）。 */
+  list(): Promise<AgentProfile[]>;
 }
 
 /** in-memory 実装（テスト・DB 無し運用）。 */
@@ -27,6 +29,10 @@ export class InMemoryAgentProfileStore implements AgentProfileStore {
   async getProfile(agentProfileId: string): Promise<AgentProfile | null> {
     const p = this.profiles.get(agentProfileId);
     return p ? { ...p } : null;
+  }
+
+  async list(): Promise<AgentProfile[]> {
+    return [...this.profiles.values()].map((p) => ({ ...p }));
   }
 }
 
@@ -56,6 +62,13 @@ export class PrismaAgentProfileStore implements AgentProfileStore {
       where: { id: agentProfileId },
     });
     return row ? toAgentProfile(row) : null;
+  }
+
+  async list(): Promise<AgentProfile[]> {
+    const rows = await this.db.agentProfile.findMany({
+      orderBy: { createdAt: "asc" },
+    });
+    return rows.map(toAgentProfile);
   }
 }
 

@@ -27,7 +27,10 @@ REST + SSE を公開する。**横依存は作らず、結合は contracts の I
 | GET | `/accounts/:id/summary` | 総資産サマリ |
 | GET | `/accounts/:id/history?from=&to=` | エクイティ推移 |
 | POST | `/instruments/:id/indicators` | バー取得→テクニカル指標計算 |
+| POST | `/backtests` | バックテスト実行（`RunBacktestRequest` → `BacktestResult`。損益・最大DD・シャープ・勝率） |
 | POST | `/agents` | AgentProfile 作成（id/createdAt はサーバ採番） |
+| GET | `/agents` | AgentProfile 一覧（agent-runner がプロファイルを権威として取得） |
+| GET | `/agents/:id` | AgentProfile 単体取得（未登録は 404） |
 | POST | `/accounts/:id/agent-decisions` | AI 発注（`rationale` 必須 → AgentDecision 記録＋発注委譲） |
 | GET | `/accounts/:id/decisions` | 意思決定ログ閲覧（監査証跡） |
 | GET | `/accounts/:id/observation` | 自律ループ向け観測（市況/保有/成績の要約） |
@@ -56,6 +59,12 @@ REST + SSE を公開する。**横依存は作らず、結合は contracts の I
 - **portfolio**: `DefaultPortfolioService` を `PortfolioRepository` + PriceProvider + FxProvider +
   `baseCurrency` で構成。
 - **analytics**: `IndicatorService`（純粋関数）にバーを渡して指標を計算。
+- **backtest**: `BacktestRunnerFactory` がリクエストの universe/range に対し market-data
+  （`getBars`）と `InstrumentProvider`（`getById`）からヒストリカルデータを前取得して
+  `InMemoryDataSource` に流し、`HistoricalBacktestRunner` を回す。約定は trading-engine、
+  指標は analytics を backtest パッケージが再利用する（apps/api は直結しない。spec §4.3）。
+- **agents 取得**: `AgentProfileStore` に `list()` を備え、`GET /agents`・`GET /agents/:id`
+  でプロファイルを返す（agent-runner が env 代替なくプロファイルを権威取得するため）。
 
 ### 銘柄 ID 体系（重要）
 
