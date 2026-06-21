@@ -26,6 +26,7 @@ REST + SSE を公開する。**横依存は作らず、結合は contracts の I
 | GET | `/accounts/:id/positions` | 保有（評価額・含み損益込み） |
 | GET | `/accounts/:id/summary` | 総資産サマリ |
 | GET | `/accounts/:id/history?from=&to=` | エクイティ推移 |
+| GET | `/accounts/:id/tax?from=&to=` | 譲渡益課税の概算（通貨別 `CapitalGainsTaxEstimate[]`。既定率 20.315%。range 未指定は年初来） |
 | POST | `/instruments/:id/indicators` | バー取得→テクニカル指標計算 |
 | POST | `/backtests` | バックテスト実行（`RunBacktestRequest` → `BacktestResult`。損益・最大DD・シャープ・勝率） |
 | POST | `/agents` | AgentProfile 作成（id/createdAt はサーバ採番） |
