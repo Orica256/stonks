@@ -8,6 +8,7 @@ import {
 import type {
   AgentDecision,
   BacktestResult,
+  CapitalGainsTaxEstimate,
   EquityPoint,
   Instrument,
   Market,
@@ -113,6 +114,21 @@ export function useDecisions(
   return useQuery({
     queryKey: queryKeys.decisions(accountId),
     queryFn: ({ signal }) => api.getDecisions(accountId, signal),
+    retry: false,
+  });
+}
+
+/**
+ * 譲渡益課税の概算（spec §2.3 P1）。通貨別の概算を取得する。
+ * 別担当のエンドポイント未提供でもアプリを壊さないよう retry:false で穏当に縮退させる。
+ */
+export function useCapitalGainsTax(
+  accountId: string,
+  range?: { from?: string; to?: string },
+): UseQueryResult<CapitalGainsTaxEstimate[]> {
+  return useQuery({
+    queryKey: queryKeys.capitalGainsTax(accountId, range),
+    queryFn: ({ signal }) => api.getCapitalGainsTax(accountId, range, signal),
     retry: false,
   });
 }

@@ -50,6 +50,20 @@ export function formatPercent(ratio: number, digits = 2): string {
   return `${sign}${pct.toFixed(digits)}%`;
 }
 
+/**
+ * 率（DecimalString。例 "0.20315"）を符号なしのパーセント表記に整形する。
+ * 税率など符号が不要な比率向け（"0.20315" → "20.315%"）。末尾 0 は丸めない。
+ */
+export function formatRatePercent(rate: string, maxDigits = 3): string {
+  const n = Number(rate);
+  if (!Number.isFinite(n)) return "—";
+  const pct = new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: maxDigits,
+  }).format(n * 100);
+  return `${pct}%`;
+}
+
 /** 符号付きの数値整形（損益額の表示など）。 */
 export function formatSigned(value: number, digits = 2): string {
   if (!Number.isFinite(value)) return "—";
