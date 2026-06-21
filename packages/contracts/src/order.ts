@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DecimalString, Id, Quantity, Timestamp } from "./common.js";
+import { MarginType } from "./margin.js";
 
 export const OrderSide = z.enum(["BUY", "SELL"]);
 export type OrderSide = z.infer<typeof OrderSide>;
@@ -31,6 +32,14 @@ export const Order = z.object({
   limitPrice: DecimalString.optional(),
   stopPrice: DecimalString.optional(),
   timeInForce: TimeInForce.default("DAY"),
+  /**
+   * 資金区分（任意。未指定は CASH=現物として扱う。Phase 3）。
+   * MARGIN は信用建て。SELL × MARGIN は新規ショート建て、BUY × MARGIN は
+   * 買い建て/返済（建て/返済の判別は trading-engine が建玉状況から決定する）。
+   * 既存の現物 Order（marginType 未設定）と後方互換にするため optional。
+   * 永続層は Prisma の `@default(CASH)` で必ず値を持つ。
+   */
+  marginType: MarginType.optional(),
   status: OrderStatus.default("PENDING"),
   createdAt: Timestamp,
   updatedAt: Timestamp,
@@ -50,6 +59,12 @@ export const PlaceOrderCommand = z
     limitPrice: DecimalString.optional(),
     stopPrice: DecimalString.optional(),
     timeInForce: TimeInForce.default("DAY"),
+    /**
+     * 資金区分（任意。未指定は CASH=現物として扱う。Phase 3）。
+     * 入力コマンドでは optional に保ち、既存の現物フロー（marginType を渡さない
+     * 呼び出し）と後方互換にする。trading-engine が未指定を CASH と解釈する。
+     */
+    marginType: MarginType.optional(),
   })
   .superRefine((cmd, ctx) => {
     const needsLimit = cmd.type === "LIMIT" || cmd.type === "STOP_LIMIT";

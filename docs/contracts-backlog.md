@@ -4,6 +4,80 @@
 > 実装側は勝手に契約を変えず（CLAUDE.md §0）、ここに申し送り、`domain-architect` が調停して反映する。
 > ステータス: **未対応（次に着手すべき設計タスク）**
 
+## Phase 3 契約: 信用取引（margin）・税ロット（tax lot）✅ 反映済み
+
+> spec §2.2 P2（信用取引）・§2.3 P2（税ロット）・§5.1（Position 信用拡張 / TaxLot）の
+> 契約・データモデルを `domain-architect` が確定。後続の trading-engine（margin 約定/金利）・
+> portfolio（tax lot 管理）の並列実装の前提。**すべて追加的・後方互換**（既存の現物フロー /
+> Phase 2 の全テストを壊さない）。
+
+### 追加した型/スキーマ（`packages/contracts`）
+- `margin.ts`:
+  - `MarginType`(CASH|MARGIN)、`Rate`（0 以上の小数文字列。浮動小数禁止）。
+  - `MarginPolicy`（initial/maintenance margin rate・annual interest/borrow rate）。
+  - `MarginRequirement`（発注前の必要保証金: notional / requiredMargin / rate）。
+  - `MarginInfo`（建玉の保証金/金利情報。Position.margin に載る）。
+  - `InterestAccrual` / `InterestAccrualType`(INTEREST|BORROW_FEE)（金利/貸株料の発生記録）。
+  - `MarginCallStatus`（追証=margin call 判定結果）。
+- `tax-lot.ts`:
+  - `TaxLot`（id, accountId, instrumentId, quantity, **remainingQuantity**, costBasis,
+    currency, acquiredAt, **method**, **taxAccountType**, acquiredTradeId?）。
+  - `CostBasisMethod`(AVERAGE|FIFO|LIFO|SPECIFIC_LOT)、`TaxAccountType`(SPECIFIC|GENERAL|NISA)。
+  - `TaxLotConsumption`（売却で取り崩したロット内訳 1 行）。
+  - `RealizedPnlWithLots`（RealizedPnl + 取り崩し内訳 `lots` + `method`。どのロットを取り崩したかを明示）。
+- 既存スキーマの拡張（**後方互換**）:
+  - `Order` / `Trade` / `Position` に `marginType: MarginType.optional()`（未指定=現物。
+    永続層は Prisma `@default(CASH)`）。`Order`/`Trade`/`Position` は **optional**（`.default` にすると
+    `z.infer` の出力型が必須化し、手書きで record を組む既存コード〔engine/portfolio/fakes〕が壊れるため）。
+  - `PlaceOrderCommand` に `marginType?`（現物コマンドは省略で従来通り）。
+  - `Position` に `margin?: MarginInfo`（MARGIN 建玉のみ）。
+  - `ledger.ts` `LedgerEntryType` に `INTEREST` / `BORROW_FEE` を追加。
+
+### 追加した IF（最小限）
+- `PortfolioService.getTaxLots?(accountId, openOnly?)`（**optional メソッド**。既存実装/フェイクを
+  壊さないため任意。portfolio の税ロット実装タスクで実装する。必須化は実装後に検討）。
+- `MarginPolicyProvider`（`trading-engine.ts`）: `getMarginPolicy(instrumentId): Promise<MarginPolicy|null>`。
+  信用不可銘柄は null（その場合 MARGIN 発注は拒否）。規定値の出所は実装側。
+
+### DB（`packages/db`）
+- 新 enum: `MarginType` / `CostBasisMethod` / `TaxAccountType` / `InterestAccrualType`、
+  `LedgerEntryType` に `INTEREST`/`BORROW_FEE` 追加。
+- `Order.marginType` / `Trade.marginType` を `@default(CASH)` で追加。
+- `Position` に信用列を追加（`marginType @default(CASH)`, `postedMargin?`, `initialMarginRate?`,
+  `maintenanceMarginRate?`, `annualRate?`, `accruedInterest @default(0)`, `lastAccruedAt?`）。
+- 新テーブル `TaxLot` / `InterestAccrual`（Account/Instrument への FK・索引付き）。
+- 手書き SQL マイグレーション: `prisma/migrations/20260620_phase3_margin_tax/migration.sql`
+  （live DB が無い環境のため生 SQL。すべて DEFAULT 付き ADD COLUMN / CREATE TABLE で後方互換）。
+
+### 後続実装担当への申し送り
+- **trading-engine（margin 約定/金利）**:
+  - `PlaceOrderCommand.marginType === "MARGIN"` のとき信用建てとして処理。`undefined`/`"CASH"` は現物。
+  - `MarginPolicyProvider.getMarginPolicy(instrumentId)` で必要保証金率・金利を解決（null=信用不可→拒否）。
+  - 発注前チェックは `MarginRequirement`（notional = quantity × price、requiredMargin = notional ×
+    initialMarginRate）を組み、`AccountStateProvider` の現金/保証金余力と突き合わせる。不足は
+    `DomainError("INSUFFICIENT_FUNDS")`。
+  - 約定で生成する `Trade` に建玉と同じ `marginType` を載せる（portfolio が CASH/MARGIN を振り分ける）。
+  - 金利は `InterestAccrual`（amount = principal × annualRate × days / 365、費用=負）を日次計上し、
+    `CashLedgerEntry(INTEREST|BORROW_FEE)` として現金へ反映。建玉側 `Position.margin.accruedInterest` /
+    `lastAccruedAt` を更新（アキュムレートのステート管理は実装側）。
+- **portfolio（tax lot 管理）**:
+  - `applyTrade` で買い（取得）ごとに `TaxLot` を 1 件起こし、売り（クローズ）で `method`
+    （既定 AVERAGE）に従い `remainingQuantity` を取り崩す。取り崩し内訳を `TaxLotConsumption[]` に残し、
+    `RealizedPnlWithLots` を算出（既存 `RealizedPnl` は据え置きで両立。詳細が要る箇所で後者を使う）。
+  - `PortfolioService.getTaxLots` を実装（取得日昇順、`openOnly` で残数量 > 0 のみ）。実装後、optional を
+    必須メソッドへ昇格するか domain-architect と調整。
+  - MARGIN 建玉は `Position.marginType="MARGIN"` + `Position.margin`(MarginInfo) を設定。
+- **未決事項 / 要調整**:
+  - `Position` の一意キーは後方互換で `[accountId, instrumentId, side]` のまま据え置いた
+    （apps/api の upsert キー `accountId_instrumentId_side` を壊さないため）。同一 (account, instrument, side)
+    で **CASH と MARGIN の LONG 建玉を別行**にしたくなった場合は、`[..., marginType]` への一意キー変更を
+    **apps/api 担当と調整**して行う（repository の where 句修正が必要）。当面は side（LONG/SHORT）で大半が分離される。
+  - 税の `method` の既定を AVERAGE としたが、JP 現物の標準は「総平均/移動平均」。FIFO/LIFO/SPECIFIC_LOT の
+    選択 UI/設定をどこで持つか（口座属性か発注時指定か）は portfolio/api 実装時に詰める。
+  - 譲渡益課税の概算（spec §2.3 P1 の税計算）と税ロットの接続（`RealizedPnlWithLots` → `CashLedgerEntry(TAX)`）は
+    portfolio 実装の範囲で詰める。spec とは矛盾なし（spec §5.1 の TaxLot 定義に `remainingQuantity` を
+    実務上追加したのみ。spec 側の TaxLot 行に残数量の含意を補記する余地あり＝**spec 更新提案候補**）。
+
 ## 優先度高（複数モジュールが回避策で凌いでいる＝早く正式化したい）
 
 ### B1. 銘柄 ID 体系の正準化 `EXCHANGE:SYMBOL` ✅ 対応済み

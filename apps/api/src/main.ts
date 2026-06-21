@@ -15,7 +15,6 @@ async function bootstrap(): Promise<void> {
 
   const config = loadConfig();
   await app.listen(config.port);
-  // eslint-disable-next-line no-console
   console.log(`stonks api listening on :${config.port}`);
 }
 

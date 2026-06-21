@@ -1,13 +1,14 @@
 import { z } from "zod";
+import type {
+  Market,
+  Money} from "./common.js";
 import {
   DecimalString,
   Id,
-  Market,
-  Money,
   Timeframe,
   Timestamp,
 } from "./common.js";
-import { Instrument } from "./instrument.js";
+import type { Instrument } from "./instrument.js";
 
 export const Quote = z.object({
   instrumentId: Id,

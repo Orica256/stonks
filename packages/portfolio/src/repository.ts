@@ -5,6 +5,8 @@ import type {
   EquityPoint,
   Position,
   RealizedPnl,
+  RealizedPnlWithLots,
+  TaxLot,
   Trade,
 } from "@stonks/contracts";
 
@@ -32,12 +34,32 @@ export interface PortfolioRepository {
   appendRealizedPnl(entry: RealizedPnl): Promise<void>;
   listRealizedPnl(accountId: string): Promise<RealizedPnl[]>;
 
+  /**
+   * 税ロット由来の実現損益詳細（どのロットをいくつ取り崩したか）。Phase 3。
+   * 既存 `RealizedPnl` とは別に併記で記録し、税ロットの監査・表示に用いる。
+   * 専用の永続化先が無い実装（例: 現状の Prisma 本番リポジトリ）では未提供で良いため optional。
+   * 基本の `RealizedPnl` は別途 `appendRealizedPnl` で必ず記録される（情報欠落なし）。
+   */
+  appendRealizedPnlWithLots?(entry: RealizedPnlWithLots): Promise<void>;
+  listRealizedPnlWithLots?(accountId: string): Promise<RealizedPnlWithLots[]>;
+
   /** 取引履歴（Trade）の追記・参照（B2: 履歴 IF を PortfolioService に出すため）。 */
   appendTrade(trade: Trade): Promise<void>;
   listTrades(accountId: string): Promise<Trade[]>;
 
   appendEquityPoint(accountId: string, point: EquityPoint): Promise<void>;
   listEquityPoints(accountId: string): Promise<EquityPoint[]>;
+
+  /**
+   * 税ロット（spec §2.3 P2 / §5.1 TaxLot。Phase 3）。
+   * 取得（買い）ごとに 1 ロットを追記し、売却の取り崩しで `remainingQuantity`
+   * を更新（saveTaxLot で upsert）する。一覧は取得日昇順を保証する。
+   */
+  appendTaxLot(lot: TaxLot): Promise<void>;
+  /** 既存ロットの更新（取り崩し後の remainingQuantity を反映）。 */
+  saveTaxLot(lot: TaxLot): Promise<void>;
+  /** 口座×銘柄の税ロット（取得日昇順）。 */
+  listTaxLots(accountId: string, instrumentId?: string): Promise<TaxLot[]>;
 }
 
 /** 副作用のない参照だけが欲しい層のための読み取り専用ビュー。 */
@@ -49,4 +71,5 @@ export type PortfolioReadModel = Pick<
   | "listRealizedPnl"
   | "listTrades"
   | "listEquityPoints"
+  | "listTaxLots"
 >;

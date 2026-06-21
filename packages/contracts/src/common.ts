@@ -36,7 +36,7 @@ export type Id = z.infer<typeof Id>;
 export const InstrumentId = z
   .string()
   .regex(
-    /^(TSE|NYSE|NASDAQ):[A-Z0-9.\-]+$/,
+    /^(TSE|NYSE|NASDAQ):[A-Z0-9.-]+$/,
     "must be EXCHANGE:SYMBOL (e.g. TSE:7203, NASDAQ:AAPL)",
   );
 export type InstrumentId = z.infer<typeof InstrumentId>;

@@ -1,4 +1,10 @@
-import type { Instrument, Money, PriceProvider } from "@stonks/contracts";
+import type {
+  Instrument,
+  MarginPolicy,
+  MarginPolicyProvider,
+  Money,
+  PriceProvider,
+} from "@stonks/contracts";
 
 /** テスト用の銘柄（東証トヨタ風: lot=100, tick あり）。 */
 export const JP_INSTRUMENT: Instrument = {
@@ -62,3 +68,31 @@ export const seqIdGenerator = (): (() => string) => {
   let n = 0;
   return () => `id-${++n}`;
 };
+
+/** JP 信用の規定ポリシー風（保証金 30%/維持 20%・買い建て金利 2.8%・貸株料 1.1%）。 */
+export const JP_MARGIN_POLICY: MarginPolicy = {
+  initialMarginRate: "0.30",
+  maintenanceMarginRate: "0.20",
+  annualInterestRate: "0.028",
+  annualBorrowRate: "0.011",
+};
+
+/**
+ * フェイクの MarginPolicyProvider。
+ * 登録済み銘柄はポリシーを返し、未登録は null（信用不可）を返す。
+ */
+export class FakeMarginPolicyProvider implements MarginPolicyProvider {
+  private readonly policies = new Map<string, MarginPolicy>();
+
+  constructor(initial: Record<string, MarginPolicy> = {}) {
+    for (const [k, v] of Object.entries(initial)) this.policies.set(k, v);
+  }
+
+  set(instrumentId: string, policy: MarginPolicy): void {
+    this.policies.set(instrumentId, policy);
+  }
+
+  async getMarginPolicy(instrumentId: string): Promise<MarginPolicy | null> {
+    return this.policies.get(instrumentId) ?? null;
+  }
+}

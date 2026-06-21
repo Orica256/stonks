@@ -77,6 +77,33 @@ enum PositionSide {
   SHORT
 }
 
+// 資金区分（現物/信用。Phase 3。contracts MarginType）。
+enum MarginType {
+  CASH
+  MARGIN
+}
+
+// 取得単価計算方式（Phase 3。contracts CostBasisMethod）。
+enum CostBasisMethod {
+  AVERAGE
+  FIFO
+  LIFO
+  SPECIFIC_LOT
+}
+
+// 口座区分（特定/一般/NISA。Phase 3。contracts TaxAccountType）。
+enum TaxAccountType {
+  SPECIFIC
+  GENERAL
+  NISA
+}
+
+// 金利/貸株料の種別（Phase 3。contracts InterestAccrualType）。
+enum InterestAccrualType {
+  INTEREST
+  BORROW_FEE
+}
+
 enum LedgerEntryType {
   DEPOSIT
   WITHDRAW
@@ -85,6 +112,8 @@ enum LedgerEntryType {
   TAX
   REALIZED_PNL
   TRADE
+  INTEREST
+  BORROW_FEE
 }
 
 enum CorporateActionType {
@@ -118,6 +147,8 @@ model Instrument {
   positions        Position[]
   orders           Order[]
   trades           Trade[]
+  taxLots          TaxLot[]
+  interestAccruals InterestAccrual[]
 
   @@unique([exchange, symbol])
   @@index([market])
@@ -191,6 +222,8 @@ model Account {
   trades       Trade[]
   ledger       CashLedgerEntry[]
   realizedPnl  RealizedPnl[]
+  taxLots      TaxLot[]
+  interestAccruals InterestAccrual[]
   decisions    AgentDecision[]
   snapshots    PerformanceSnapshot[]
 }
@@ -214,11 +247,23 @@ model Position {
   quantity     Float
   avgCost      Decimal
   currency     Currency // 建玉の取引通貨（B3: 自己記述的にし換算で参照する）
-  openedAt     DateTime     @default(now())
+  // ── 信用拡張（Phase 3。現物建玉は既定/NULL で従来挙動を維持）──
+  marginType            MarginType @default(CASH)
+  postedMargin          Decimal? // 拘束した保証金（MARGIN のみ）
+  initialMarginRate     Decimal? // 建玉時の必要保証金率
+  maintenanceMarginRate Decimal? // 維持保証金率
+  annualRate            Decimal? // 適用年利（金利/貸株料）
+  accruedInterest       Decimal    @default(0) // 累計の金利/貸株料（現金反映済み）
+  lastAccruedAt         DateTime? // 直近の金利計上時刻
+  openedAt              DateTime   @default(now())
 
   account    Account    @relation(fields: [accountId], references: [id])
   instrument Instrument @relation(fields: [instrumentId], references: [id])
 
+  // 一意キーは現物フロー後方互換のため [accountId, instrumentId, side] のまま据え置く
+  // （apps/api の upsert キー accountId_instrumentId_side を壊さない）。
+  // CASH/MARGIN 建玉を同一 (account, instrument, side) で別行管理したくなった場合は、
+  // marginType を含めた一意キーへの変更を api 担当と調整して行うこと（申し送り参照）。
   @@unique([accountId, instrumentId, side])
 }
 
@@ -233,6 +278,7 @@ model Order {
   limitPrice     Decimal?
   stopPrice      Decimal?
   timeInForce    TimeInForce @default(DAY)
+  marginType     MarginType  @default(CASH) // 資金区分（Phase 3。既定 CASH=現物）
   status         OrderStatus @default(PENDING)
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
@@ -252,9 +298,10 @@ model Trade {
   side         OrderSide
   quantity     Float
   price        Decimal
-  fee          Decimal   @default(0)
+  fee          Decimal    @default(0)
   currency     Currency
-  executedAt   DateTime  @default(now())
+  marginType   MarginType @default(CASH) // 資金区分（Phase 3。既定 CASH=現物）
+  executedAt   DateTime   @default(now())
 
   order      Order      @relation(fields: [orderId], references: [id])
   account    Account    @relation(fields: [accountId], references: [id])
@@ -291,6 +338,46 @@ model RealizedPnl {
   account Account @relation(fields: [accountId], references: [id])
 
   @@index([accountId, closedAt])
+}
+
+// ── 税ロット / 信用金利（Phase 3。spec §5.1 TaxLot・信用拡張） ──
+model TaxLot {
+  id                String          @id @default(cuid())
+  accountId         String
+  instrumentId      String
+  quantity          Float // 取得時数量
+  remainingQuantity Float // 未決済残数量（0 でクローズ）
+  costBasis         Decimal // 取得単価
+  currency          Currency
+  acquiredAt        DateTime        @default(now())
+  method            CostBasisMethod @default(AVERAGE)
+  taxAccountType    TaxAccountType  @default(SPECIFIC)
+  acquiredTradeId   String? // 取得元 Trade
+
+  account    Account    @relation(fields: [accountId], references: [id])
+  instrument Instrument @relation(fields: [instrumentId], references: [id])
+
+  @@index([accountId, instrumentId, acquiredAt])
+}
+
+model InterestAccrual {
+  id           String              @id @default(cuid())
+  accountId    String
+  positionId   String // 対象の信用建玉
+  instrumentId String
+  type         InterestAccrualType
+  principal    Decimal // 基準額（建玉総代金）
+  annualRate   Decimal // 適用年利
+  days         Int // 計上対象日数
+  amount       Decimal // 発生額（費用=負）
+  currency     Currency
+  accruedAt    DateTime            @default(now())
+
+  account    Account    @relation(fields: [accountId], references: [id])
+  instrument Instrument @relation(fields: [instrumentId], references: [id])
+
+  @@index([accountId, accruedAt])
+  @@index([positionId, accruedAt])
 }
 
 // ── 戦略・バックテスト（Phase 0 で契約確定、実装は Phase 3） ──

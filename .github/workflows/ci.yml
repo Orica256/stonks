@@ -1,0 +1,31 @@
+name: CI
+
+# 全モジュール横断の整合性ゲート。
+# push / PR で typecheck・テスト（契約遵守テスト含む）・spec↔実装/モジュール間 IF の
+# 整合性チェックをまとめて実行する。GitHub 上で無料で動く（ローカルでは `pnpm verify`）。
+
+on:
+  push:
+    branches: ["main", "integration/**"]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # pnpm はリポジトリ指定の packageManager（pnpm@9.12.0）を corepack で固定。
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # db:generate → typecheck → test → check:consistency（= pnpm verify）。
+      - name: Verify (typecheck, tests, cross-module consistency)
+        run: pnpm verify

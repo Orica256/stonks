@@ -5,6 +5,7 @@ import type {
   EquityPoint,
   Position,
   RealizedPnl,
+  TaxLot,
   Trade,
 } from "@stonks/contracts";
 import type { PortfolioRepository } from "@stonks/portfolio";
@@ -207,4 +208,73 @@ export class PrismaPortfolioRepository implements PortfolioRepository {
     });
     return rows.map((r) => ({ ts: r.ts.toISOString(), equity: r.equity.toString() }));
   }
+
+  // ── 税ロット（Phase 3。db の TaxLot テーブルへ永続化）──
+
+  async appendTaxLot(lot: TaxLot): Promise<void> {
+    await this.db.taxLot.create({ data: taxLotData(lot) });
+  }
+
+  async saveTaxLot(lot: TaxLot): Promise<void> {
+    const data = taxLotData(lot);
+    await this.db.taxLot.upsert({
+      where: { id: lot.id },
+      create: data,
+      update: { remainingQuantity: lot.remainingQuantity },
+    });
+  }
+
+  async listTaxLots(accountId: string, instrumentId?: string): Promise<TaxLot[]> {
+    const rows = await this.db.taxLot.findMany({
+      where: { accountId, ...(instrumentId !== undefined ? { instrumentId } : {}) },
+      orderBy: { acquiredAt: "asc" },
+    });
+    return rows.map(toTaxLot);
+  }
+}
+
+/** contracts.TaxLot → Prisma create/update data。 */
+function taxLotData(lot: TaxLot) {
+  return {
+    id: lot.id,
+    accountId: lot.accountId,
+    instrumentId: lot.instrumentId,
+    quantity: lot.quantity,
+    remainingQuantity: lot.remainingQuantity,
+    costBasis: lot.costBasis,
+    currency: lot.currency,
+    acquiredAt: new Date(lot.acquiredAt),
+    method: lot.method,
+    taxAccountType: lot.taxAccountType,
+    ...(lot.acquiredTradeId !== undefined ? { acquiredTradeId: lot.acquiredTradeId } : {}),
+  };
+}
+
+/** Prisma TaxLot 行 → contracts.TaxLot。 */
+function toTaxLot(row: {
+  id: string;
+  accountId: string;
+  instrumentId: string;
+  quantity: number;
+  remainingQuantity: number;
+  costBasis: { toString(): string };
+  currency: Currency;
+  acquiredAt: Date;
+  method: TaxLot["method"];
+  taxAccountType: TaxLot["taxAccountType"];
+  acquiredTradeId: string | null;
+}): TaxLot {
+  return {
+    id: row.id,
+    accountId: row.accountId,
+    instrumentId: row.instrumentId,
+    quantity: row.quantity,
+    remainingQuantity: row.remainingQuantity,
+    costBasis: row.costBasis.toString(),
+    currency: row.currency,
+    acquiredAt: row.acquiredAt.toISOString(),
+    method: row.method,
+    taxAccountType: row.taxAccountType,
+    ...(row.acquiredTradeId !== null ? { acquiredTradeId: row.acquiredTradeId } : {}),
+  };
 }

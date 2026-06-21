@@ -1,5 +1,6 @@
 import type { Money } from "./common.js";
 import type { Instrument } from "./instrument.js";
+import type { MarginPolicy } from "./margin.js";
 import type { PriceProvider } from "./market-data.js";
 import type { Order, PlaceOrderCommand } from "./order.js";
 import type { Fill, Trade } from "./trade.js";
@@ -17,6 +18,17 @@ export interface FeeModel {
 /** 約定モデル（成行/指値の約定判定とスリッページ）。 */
 export interface FillModel {
   tryFill(order: Order, marketPrice: string): Fill | null;
+}
+
+/**
+ * 信用建ての保証金/金利規定値プロバイダ（Phase 3。spec §2.2）。
+ *
+ * trading-engine が銘柄ごとの必要保証金率・金利を解決するための最小ポート。
+ * 信用不可銘柄は null を返す（その場合 MARGIN 発注は拒否される）。
+ * 規定値の出所（設定/市場ルール）は実装側に委ねる。
+ */
+export interface MarginPolicyProvider {
+  getMarginPolicy(instrumentId: string): Promise<MarginPolicy | null>;
 }
 
 /**
