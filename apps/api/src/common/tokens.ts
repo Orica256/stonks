@@ -21,6 +21,9 @@ export const TOKENS = {
   /** analytics の IndicatorService。 */
   IndicatorService: "INDICATOR_SERVICE",
 
+  /** backtest の BacktestRunnerFactory（universe/range ごとにデータソースを束ねて実行）。 */
+  BacktestRunnerFactory: "BACKTEST_RUNNER_FACTORY",
+
   /** agent-trader の AgentTradingService / PerformanceEvaluator と内部 IF。 */
   AgentTradingService: "AGENT_TRADING_SERVICE",
   PerformanceEvaluator: "PERFORMANCE_EVALUATOR",
