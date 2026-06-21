@@ -2,10 +2,12 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
+  type UseMutationResult,
   type UseQueryResult,
 } from "@tanstack/react-query";
 import type {
   AgentDecision,
+  BacktestResult,
   EquityPoint,
   Instrument,
   Market,
@@ -15,6 +17,7 @@ import type {
   PositionView,
   PriceBar,
   Quote,
+  RunBacktestRequest,
   Timeframe,
   Trade,
 } from "@stonks/contracts";
@@ -111,6 +114,20 @@ export function useDecisions(
     queryKey: queryKeys.decisions(accountId),
     queryFn: ({ signal }) => api.getDecisions(accountId, signal),
     retry: false,
+  });
+}
+
+/**
+ * バックテスト実行ミューテーション（spec §6.5 / §6.8 `POST /backtests`）。
+ * サーバ状態を持たない一回性の計算なので無効化対象クエリはない。
+ */
+export function useRunBacktest(): UseMutationResult<
+  BacktestResult,
+  Error,
+  RunBacktestRequest
+> {
+  return useMutation<BacktestResult, Error, RunBacktestRequest>({
+    mutationFn: (req) => api.runBacktest(req),
   });
 }
 
