@@ -1,6 +1,10 @@
 "use client";
 
-import { usePositions, useSummary } from "@/lib/api/hooks";
+import {
+  useCapitalGainsTax,
+  usePositions,
+  useSummary,
+} from "@/lib/api/hooks";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   EmptyState,
@@ -9,10 +13,12 @@ import {
 } from "@/components/ui/states";
 import {
   errorMessage,
+  formatMoney,
   formatMoneyValue,
   formatPrice,
   formatQuantity,
   formatPercent,
+  formatRatePercent,
   pnlColorClass,
 } from "@/lib/format";
 import { DEFAULT_ACCOUNT_ID } from "@/lib/env";
@@ -24,6 +30,8 @@ export default function PortfolioPage(): JSX.Element {
   const accountId = DEFAULT_ACCOUNT_ID;
   const positions = usePositions(accountId);
   const summary = useSummary(accountId);
+  // 期間無指定。集計期間は API 側の既定（年初来等）に委ねる（spec §2.3 P1）。
+  const tax = useCapitalGainsTax(accountId);
 
   return (
     <div className="space-y-6">
@@ -113,6 +121,57 @@ export default function PortfolioPage(): JSX.Element {
               </table>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>譲渡益課税（概算）</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {tax.isLoading ? (
+            <LoadingState />
+          ) : tax.isError ? (
+            <ErrorState message={errorMessage(tax.error)} />
+          ) : !tax.data || tax.data.length === 0 ? (
+            <EmptyState>対象期間の実現益はありません。</EmptyState>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-left text-neutral-500">
+                  <tr>
+                    <th className="py-2 pr-4">通貨</th>
+                    <th className="py-2 pr-4 text-right">実現益</th>
+                    <th className="py-2 pr-4 text-right">概算税率</th>
+                    <th className="py-2 pr-4 text-right">概算税額</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tax.data.map((t) => (
+                    <tr
+                      key={t.currency}
+                      className="border-t border-neutral-100"
+                    >
+                      <td className="py-2 pr-4 font-medium">{t.currency}</td>
+                      <td className="py-2 pr-4 text-right">
+                        {formatMoney(t.realizedGains, t.currency)}
+                      </td>
+                      <td className="py-2 pr-4 text-right">
+                        {formatRatePercent(t.taxRate)}
+                      </td>
+                      <td className="py-2 pr-4 text-right">
+                        {formatMoney(t.estimatedTax, t.currency)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="mt-3 text-xs text-neutral-500">
+            実現益（プラス分のみ）に概算税率を掛けた目安です。損益通算・繰越控除・取得費の細目・口座区分（特定/一般/NISA
+            等）は反映しません。確定申告の正確な税額計算ではなく、投資助言でもありません。
+          </p>
         </CardContent>
       </Card>
     </div>

@@ -14,4 +14,14 @@ export const queryKeys = {
   performance: (accountId: string, range?: string) =>
     ["performance", accountId, range ?? "default"] as const,
   decisions: (accountId: string) => ["decisions", accountId] as const,
+  capitalGainsTax: (
+    accountId: string,
+    range?: { from?: string; to?: string },
+  ) =>
+    [
+      "tax",
+      accountId,
+      range?.from ?? "all",
+      range?.to ?? "all",
+    ] as const,
 };

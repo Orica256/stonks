@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CapitalGainsTaxEstimate,
   EquityPoint,
   PortfolioSummary,
   PositionView,
@@ -37,6 +38,8 @@ describe("PortfolioService 契約遵守", () => {
     expect(typeof svc.withdraw).toBe("function");
     expect(typeof svc.getTrades).toBe("function");
     expect(typeof svc.getRealizedPnl).toBe("function");
+    // Phase 3: 譲渡益課税の概算（optional IF を実装に格上げ）。
+    expect(typeof svc.estimateCapitalGainsTax).toBe("function");
   });
 
   it("出力は PositionView / PortfolioSummary / EquityPoint スキーマに通る", async () => {
@@ -89,6 +92,14 @@ describe("PortfolioService 契約遵守", () => {
     const realized = await svc.getRealizedPnl("a");
     expect(realized).toHaveLength(1);
     expect(RealizedPnl.parse(realized[0])).toBeTruthy();
+
+    // Phase 3: 譲渡益課税の概算が CapitalGainsTaxEstimate スキーマに通る。
+    const tax = await svc.estimateCapitalGainsTax!("a", {
+      from: new Date("2026-06-19T00:00:00Z"),
+      to: new Date("2026-06-19T23:59:59Z"),
+    });
+    expect(tax).toHaveLength(1);
+    expect(CapitalGainsTaxEstimate.parse(tax[0])).toBeTruthy();
   });
 
   it("withdraw は残高不足を拒否する（B4）", async () => {

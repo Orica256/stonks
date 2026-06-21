@@ -1,7 +1,11 @@
 import Decimal from "decimal.js";
-import { Money as M } from "@stonks/core-domain";
-import { DomainError } from "@stonks/contracts";
+import {
+  Money as M,
+  estimateCapitalGainsTax as estimateCapitalGainsTaxAmount,
+} from "@stonks/core-domain";
+import { DEFAULT_CAPITAL_GAINS_TAX_RATE, DomainError } from "@stonks/contracts";
 import type {
+  CapitalGainsTaxEstimate,
   CashLedgerEntry,
   CostBasisMethod,
   Currency,
@@ -15,6 +19,7 @@ import type {
   PortfolioSummary,
   PositionView,
   PriceProvider,
+  Rate,
   RealizedPnl,
   TaxAccountType,
   TaxLot,
@@ -53,6 +58,11 @@ export interface PortfolioServiceDeps {
   taxAccountType?: TaxAccountType;
   /** MARGIN 建玉の保証金/金利情報を Trade から解決する任意フック（Phase 3）。 */
   marginInfoResolver?: MarginInfoResolver;
+  /**
+   * 譲渡益課税の概算率（spec §2.3 P1）。省略時は DEFAULT_CAPITAL_GAINS_TAX_RATE（20.315%）。
+   * 口座区分・通貨で差し替え可能（例 US 口座、NISA 非課税は "0"）。`Rate`（DecimalString）。
+   */
+  capitalGainsTaxRate?: Rate;
 }
 
 const ZERO = new Decimal(0);
@@ -77,6 +87,7 @@ export class DefaultPortfolioService implements PortfolioService {
   private readonly costBasisMethod: CostBasisMethod;
   private readonly taxAccountType: TaxAccountType;
   private readonly marginInfoResolver: MarginInfoResolver | undefined;
+  private readonly capitalGainsTaxRate: Rate;
   private seq = 0;
 
   constructor(deps: PortfolioServiceDeps) {
@@ -88,6 +99,8 @@ export class DefaultPortfolioService implements PortfolioService {
     this.costBasisMethod = deps.costBasisMethod ?? "AVERAGE";
     this.taxAccountType = deps.taxAccountType ?? "SPECIFIC";
     this.marginInfoResolver = deps.marginInfoResolver;
+    this.capitalGainsTaxRate =
+      deps.capitalGainsTaxRate ?? DEFAULT_CAPITAL_GAINS_TAX_RATE;
   }
 
   /**
@@ -146,6 +159,63 @@ export class DefaultPortfolioService implements PortfolioService {
     return openOnly
       ? lots.filter((l) => new Decimal(l.remainingQuantity).gt(ZERO))
       : lots;
+  }
+
+  /**
+   * 譲渡益課税の「概算」を通貨別に算出する（spec §2.3 P1。Phase 3）。
+   *
+   * 対象期間（`range.from`〜`range.to`、UTC、`closedAt` で両端含めて絞る）にクローズした
+   * RealizedPnl を通貨ごとに集計し、各通貨の実現損益合計（`realizedGains`）から概算税額を求める。
+   * 税額計算は core-domain の純関数 `estimateCapitalGainsTax` に委譲し、自前で率計算しない。
+   *
+   * **これは確定申告の正確計算ではなく概算**（CLAUDE.md §7 免責。投資助言ではない）:
+   * - 損益通算・繰越控除・各種特例は行わない。**益のみ課税対象**とみなし、損失通貨は税額 0。
+   * - 適用率は `capitalGainsTaxRate`（既定 DEFAULT_CAPITAL_GAINS_TAX_RATE = 20.315%）。設定で差し替え可。
+   * - 金額は浮動小数を使わず DecimalString（CLAUDE.md §0）。基軸換算はしない（通貨別に返す）。
+   *
+   * 対象期間に実現損益が 1 件もない通貨は結果に含めない（実現があった通貨のみ返す）。
+   * 通貨は安定した順序（最初に出現した順）で返す。
+   */
+  async estimateCapitalGainsTax(
+    accountId: string,
+    range: { from: Date; to: Date },
+  ): Promise<CapitalGainsTaxEstimate[]> {
+    const from = range.from.getTime();
+    const to = range.to.getTime();
+    const entries = await this.repo.listRealizedPnl(accountId);
+
+    // 通貨別に実現損益を合算（出現順を保持して決定的に返す）。
+    const order: Currency[] = [];
+    const gainsByCurrency = new Map<Currency, Decimal>();
+    for (const e of entries) {
+      const t = new Date(e.closedAt).getTime();
+      if (t < from || t > to) continue; // 範囲外（両端含む）
+      const prev = gainsByCurrency.get(e.currency);
+      if (prev === undefined) {
+        order.push(e.currency);
+        gainsByCurrency.set(e.currency, new Decimal(e.realized));
+      } else {
+        gainsByCurrency.set(e.currency, prev.plus(e.realized));
+      }
+    }
+
+    const taxRate = this.capitalGainsTaxRate;
+    const normalizedRange = {
+      from: range.from.toISOString(),
+      to: range.to.toISOString(),
+    };
+    return order.map((currency) => {
+      const realizedGains = gainsByCurrency.get(currency)!.toString();
+      return {
+        accountId,
+        range: normalizedRange,
+        currency,
+        realizedGains,
+        taxRate,
+        // 純関数に委譲（損失は 0 床。max(realizedGains, 0) × taxRate）。
+        estimatedTax: estimateCapitalGainsTaxAmount(realizedGains, taxRate),
+      };
+    });
   }
 
   async applyTrade(trade: Trade): Promise<void> {

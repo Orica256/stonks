@@ -10,6 +10,7 @@ import {
 import type { Instrument } from "./instrument.js";
 import type { RealizedPnl } from "./ledger.js";
 import { MarginInfo, MarginType } from "./margin.js";
+import type { CapitalGainsTaxEstimate } from "./tax.js";
 import type { TaxLot } from "./tax-lot.js";
 import type { Trade } from "./trade.js";
 
@@ -105,6 +106,21 @@ export interface PortfolioService {
    * portfolio の税ロット実装タスクで必須化を検討する。
    */
   getTaxLots?(accountId: string, openOnly?: boolean): Promise<TaxLot[]>;
+
+  /**
+   * 譲渡益課税の概算（spec §2.3 P1。Phase 3）。
+   * 対象期間にクローズした実現益（RealizedPnl）から通貨別に概算税額を算出して返す
+   * （通貨ごとに 1 件の `CapitalGainsTaxEstimate`）。確定申告の正確計算ではなく **概算**
+   * （CLAUDE.md §7 免責。損失は通算せず益のみ課税対象とみなす簡略方針）。
+   * 適用率の既定は `DEFAULT_CAPITAL_GAINS_TAX_RATE`（20.315%）で、設定で差し替え可能。
+   *
+   * 後方互換のため optional とする（Phase 2 の既存実装/フェイクを壊さない）。
+   * portfolio の実装タスクで必須化を検討する。
+   */
+  estimateCapitalGainsTax?(
+    accountId: string,
+    range: { from: Date; to: Date },
+  ): Promise<CapitalGainsTaxEstimate[]>;
 }
 
 /**

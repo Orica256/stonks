@@ -2,6 +2,7 @@ import type {
   AgentDecision,
   BacktestResult,
   BenchmarkComparison,
+  CapitalGainsTaxEstimate,
   EquityPoint,
   Instrument,
   Market,
@@ -130,6 +131,23 @@ export function getHistory(
 ): Promise<EquityPoint[]> {
   return apiRequest<EquityPoint[]>(
     `/accounts/${encodeURIComponent(accountId)}/history`,
+    { query: { from: range?.from, to: range?.to }, signal },
+  );
+}
+
+/**
+ * `GET /accounts/:id/tax?from=&to=`（spec §2.3 P1「税計算（譲渡益課税の概算）」）。
+ * 期間内の RealizedPnl から導出した通貨別の概算（益のみ課税対象・損失は 0 床）を返す。
+ * 戻り値は契約型 `CapitalGainsTaxEstimate[]` そのまま（手書き型を作らない）。
+ * 別担当が並行実装中。range 無指定時は API 側の既定期間（年初来等）に委ねる。
+ */
+export function getCapitalGainsTax(
+  accountId: string,
+  range?: { from?: string; to?: string },
+  signal?: AbortSignal,
+): Promise<CapitalGainsTaxEstimate[]> {
+  return apiRequest<CapitalGainsTaxEstimate[]>(
+    `/accounts/${encodeURIComponent(accountId)}/tax`,
     { query: { from: range?.from, to: range?.to }, signal },
   );
 }
