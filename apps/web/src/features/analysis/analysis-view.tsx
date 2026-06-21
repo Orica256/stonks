@@ -5,6 +5,7 @@ import { cn } from "@/lib/cn";
 import { InstrumentPicker } from "./instrument-picker";
 import { ComparePanel } from "./compare-panel";
 import { HeatmapPanel } from "./heatmap-panel";
+import { DrawingPanel } from "./drawing-panel";
 
 /** 分析画面のタブ種別（spec §2.4 P2: 比較 / ヒートマップ / 描画ツール）。 */
 type Tab = "compare" | "heatmap" | "draw";
@@ -42,26 +43,15 @@ export function AnalysisView(): JSX.Element {
         ))}
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[20rem_1fr]">
-        <InstrumentPicker />
-        <div>
-          {tab === "compare" ? (
-            <ComparePanel />
-          ) : tab === "heatmap" ? (
-            <HeatmapPanel />
-          ) : (
-            <PlaceholderTab label={TABS.find((t) => t.value === tab)?.label ?? ""} />
-          )}
+      {/* 描画ツールは単一銘柄を自前で選ぶため独立レイアウト。比較/ヒートマップは共有ピッカー。 */}
+      {tab === "draw" ? (
+        <DrawingPanel />
+      ) : (
+        <div className="grid gap-6 lg:grid-cols-[20rem_1fr]">
+          <InstrumentPicker />
+          <div>{tab === "compare" ? <ComparePanel /> : <HeatmapPanel />}</div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function PlaceholderTab({ label }: { label?: string }): JSX.Element {
-  return (
-    <div className="rounded-lg border border-dashed border-neutral-200 px-4 py-12 text-center text-sm text-neutral-400">
-      {label} は準備中です。
+      )}
     </div>
   );
 }

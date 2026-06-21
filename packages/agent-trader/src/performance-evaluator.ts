@@ -2,7 +2,6 @@ import Decimal from "decimal.js";
 import type {
   BenchmarkComparison,
   BenchmarkId,
-  EquityPoint,
   PerformanceEvaluator as IPerformanceEvaluator,
   PerformanceSnapshot,
   PortfolioService,
@@ -30,6 +29,33 @@ export interface PerformanceEvaluatorDeps {
 }
 
 const ZERO = new Decimal(0);
+
+/** ベンチ比較を公正に行えない理由（推測リターンを出さず明示する）。 */
+export type BenchmarkUnavailableReason =
+  /** 当該ベンチの instrumentId が設定されていない。 */
+  | "NOT_CONFIGURED"
+  /** ベンチ銘柄の基準点の価格が取得できない（データ欠落）。 */
+  | "PRICE_DATA_MISSING"
+  /** 戦略側のエクイティ点が range 内に不足し、同条件比較ができない。 */
+  | "NO_STRATEGY_EQUITY";
+
+/**
+ * ベンチ比較が公正に成立しないときに投げる型付きエラー（spec §2.7 P1 / §9）。
+ *
+ * `BenchmarkComparison` 契約は nullable フィールドを持たないため、
+ * 「ベンチ未提供」は値を捏造せず例外で表現する。呼び出し側（api 等）は
+ * `reason` を見て「比較不能」を明示的に扱える（推測リターンを出さない）。
+ */
+export class BenchmarkUnavailableError extends Error {
+  constructor(
+    readonly benchmark: BenchmarkId,
+    readonly reason: BenchmarkUnavailableReason,
+    message: string,
+  ) {
+    super(message);
+    this.name = "BenchmarkUnavailableError";
+  }
+}
 
 /**
  * 成績評価（ライブ・フォワードテスト。spec §2.7 / §9）。
@@ -102,47 +128,101 @@ export class DefaultPerformanceEvaluator implements IPerformanceEvaluator {
     return snapshot;
   }
 
+  /**
+   * 戦略 vs ベンチのリターン比較（spec §2.7 P1「ベンチマーク比較」/ §9 公正性）。
+   *
+   * 公正性のための同条件保証:
+   * - **基準点を一致させる**: 戦略リターンは range 内の実エクイティ点の最初→最後で測る。
+   *   ベンチも *その同じ 2 点のタイムスタンプ* の価格で測る（nominal な range.from/to ではなく、
+   *   実際にデータが存在する境界に揃える）。これで両者の評価期間がずれない。
+   * - **ルックアヘッド禁止**: 価格取得は基準点の時刻まで。評価時点（range.to）以降の値は使わない。
+   * - **手数料込み**: 戦略のエクイティは PortfolioService（約定・手数料反映後）由来。
+   *
+   * 比較が公正に成立しない場合は値を捏造せず {@link BenchmarkUnavailableError} を投げる。
+   */
   async compare(
     accountId: string,
     benchmark: BenchmarkId,
     range: { from: Date; to: Date },
   ): Promise<BenchmarkComparison> {
-    // 戦略リターン: range 内のエクイティ点の最初→最後（同条件・手数料込み）。
-    const history = (await this.portfolio.getHistory(accountId, range))
-      .slice()
-      .sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
-    const strategyReturn = periodReturn(history);
-
-    // ベンチリターン: range.from と range.to の時点価格から算出（ルックアヘッド禁止）。
     const instrumentId =
       benchmark === "BUY_AND_HOLD"
         ? this.benchmark.buyAndHoldInstrumentId
         : this.benchmark.indexInstrumentId?.[benchmark];
     if (!instrumentId) {
-      throw new Error(
+      throw new BenchmarkUnavailableError(
+        benchmark,
+        "NOT_CONFIGURED",
         `no benchmark instrument configured for ${benchmark}`,
       );
     }
-    const startPx = new Decimal(
-      (await this.price.getLatestPrice(instrumentId, range.from)).amount,
+
+    // 戦略リターン: range 内のエクイティ点の最初→最後（同条件・手数料込み）。
+    const history = (await this.portfolio.getHistory(accountId, range))
+      .slice()
+      .sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+    if (history.length < 2) {
+      // 同条件で測れる戦略エクイティ点が無い → 比較不能を明示（0 を捏造しない）。
+      throw new BenchmarkUnavailableError(
+        benchmark,
+        "NO_STRATEGY_EQUITY",
+        `not enough equity points in range to compare ${benchmark}`,
+      );
+    }
+    const startPoint = history[0]!;
+    const endPoint = history[history.length - 1]!;
+    const strategyReturn = simpleReturn(
+      new Decimal(startPoint.equity),
+      new Decimal(endPoint.equity),
     );
-    const endPx = new Decimal(
-      (await this.price.getLatestPrice(instrumentId, range.to)).amount,
+
+    // ベンチリターン: 戦略と *同一の基準時刻* の価格から算出（同条件・ルックアヘッド禁止）。
+    const startPx = await this.benchmarkPriceAt(
+      benchmark,
+      instrumentId,
+      new Date(startPoint.ts),
     );
-    const benchmarkReturn = startPx.lte(ZERO)
-      ? 0
-      : endPx.minus(startPx).dividedBy(startPx).toNumber();
+    const endPx = await this.benchmarkPriceAt(
+      benchmark,
+      instrumentId,
+      new Date(endPoint.ts),
+    );
+    const benchmarkReturn = simpleReturn(startPx, endPx);
 
     return {
       accountId,
       benchmark,
-      range: { from: range.from.toISOString(), to: range.to.toISOString() },
+      // 比較に実際に用いた基準点を返す（戦略・ベンチで一致）。
+      range: { from: startPoint.ts, to: endPoint.ts },
       strategyReturn,
       benchmarkReturn,
       excessReturn: new Decimal(strategyReturn)
         .minus(benchmarkReturn)
         .toNumber(),
     };
+  }
+
+  /**
+   * ベンチ銘柄の at 時点価格を取得する。データ欠落は推測せず
+   * {@link BenchmarkUnavailableError} に倒す（公正性 §9）。
+   */
+  private async benchmarkPriceAt(
+    benchmark: BenchmarkId,
+    instrumentId: string,
+    at: Date,
+  ): Promise<Decimal> {
+    try {
+      const px = await this.price.getLatestPrice(instrumentId, at);
+      return new Decimal(px.amount);
+    } catch (err) {
+      throw new BenchmarkUnavailableError(
+        benchmark,
+        "PRICE_DATA_MISSING",
+        `no benchmark price for ${instrumentId} at ${at.toISOString()}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
   }
 
   /**
@@ -219,11 +299,8 @@ export class DefaultPerformanceEvaluator implements IPerformanceEvaluator {
   }
 }
 
-/** EquityPoint 列の最初→最後の単純リターン。 */
-const periodReturn = (history: EquityPoint[]): number => {
-  if (history.length < 2) return 0;
-  const first = new Decimal(history[0]!.equity);
-  const last = new Decimal(history[history.length - 1]!.equity);
+/** 基準値→終値の単純リターン。基準が 0 以下なら 0（ゼロ割回避）。 */
+const simpleReturn = (first: Decimal, last: Decimal): number => {
   if (first.lte(ZERO)) return 0;
   return last.minus(first).dividedBy(first).toNumber();
 };

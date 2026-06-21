@@ -1,5 +1,6 @@
 import type {
   AgentDecision,
+  BacktestResult,
   BenchmarkComparison,
   EquityPoint,
   Instrument,
@@ -11,6 +12,7 @@ import type {
   PositionView,
   PriceBar,
   Quote,
+  RunBacktestRequest,
   Timeframe,
   Trade,
 } from "@stonks/contracts";
@@ -153,4 +155,22 @@ export function getDecisions(
     `/accounts/${encodeURIComponent(accountId)}/decisions`,
     { signal },
   );
+}
+
+// ── backtest（spec §6.5 / §6.8）──
+
+/**
+ * `POST /backtests`（spec §6.8）。StrategyDef + 期間 + 初期資金を渡し
+ * 指標（総損益・最大DD・シャープ・勝率）とエクイティカーブを得る。
+ * 入出力型は contracts から導出（手書きしない）。
+ */
+export function runBacktest(
+  req: RunBacktestRequest,
+  signal?: AbortSignal,
+): Promise<BacktestResult> {
+  return apiRequest<BacktestResult>("/backtests", {
+    method: "POST",
+    body: req,
+    signal,
+  });
 }

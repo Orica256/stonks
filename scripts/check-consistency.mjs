@@ -155,7 +155,7 @@ function specSection(spec, heading) {
 }
 
 /** spec §6.8 に載るが API 実装が後続フェーズ保留のエンドポイント（既知ギャップ）。 */
-const KNOWN_PENDING = new Set(["backtests"]); // POST /backtests は Phase 3（backtest API）で実装
+const KNOWN_PENDING = new Set([]); // POST /backtests は Phase 3 で実装済み（保留解除）
 
 function checkSpecEndpoints(spec, routes) {
   const region = specSection(spec, "### 6.8");

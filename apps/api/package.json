@@ -18,6 +18,7 @@
     "@nestjs/platform-express": "^10.4.4",
     "@stonks/agent-trader": "workspace:*",
     "@stonks/analytics": "workspace:*",
+    "@stonks/backtest": "workspace:*",
     "@stonks/contracts": "workspace:*",
     "@stonks/core-domain": "workspace:*",
     "@stonks/db": "workspace:*",

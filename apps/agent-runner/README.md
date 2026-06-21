@@ -35,12 +35,28 @@ LLM 判断は `DecisionProvider { decide(input): Promise<{ rationale, actions }>
 
 - `hold`（既定）: 無 LLM・無課金・無ネットワークの安全プロバイダ。常に HOLD を返し発注しない。
   配線（観測→判断→記録）の検証やドライランに使う。
-- `llm`: 実 LLM 呼び出し（**課金が発生**）を行う実装に差し替える想定。現状その実装は未提供で、
-  指定しても警告して HOLD にフォールバックする（誤課金/暴走防止）。実装追加時は LLM キー
-  （`ANTHROPIC_API_KEY` 等）を `provider-factory.ts` 内でのみ読み、`RunnerConfig` に秘密情報を載せない。
+- `llm`: 実 LLM（**Anthropic Claude**）呼び出しを行う `LlmDecisionProvider`（`llm-decision-provider.ts`）。
+  **呼び出しごとに LLM 利用料が発生**する。`AGENT_RUNNER_PROVIDER=llm` を**明示**し、かつ
+  `ANTHROPIC_API_KEY` が設定されているときのみ実 LLM を呼ぶ。キーが無ければ `provider=llm` でも
+  警告して HOLD にフォールバックする（誤った未認証呼び出し/暴走/誤課金を防ぐ）。
 
-テストは実 LLM・実ネットワーク・実 Redis を使わず、フェイク `DecisionProvider` と
-フェイク `fetch` に対して検証する（CLAUDE.md §3）。
+### `llm` プロバイダの仕様（`LlmDecisionProvider`）
+
+- パッケージ: `@anthropic-ai/sdk`（OSS。利用料=API 課金はアプリのインフラ無料制約とは別枠。spec §2.7）。
+- クライアント: `new Anthropic()`。**API キーは SDK が env `ANTHROPIC_API_KEY` から自動解決**する。
+  キーは `provider-factory.ts` で「存在判定」にのみ使い、`RunnerConfig`・ログ・コミットに値を載せない。
+- 呼び出し: 非ストリーミング・ツールなしのテキスト補完（`messages.create`）。`model` は
+  `AGENT_LLM_MODEL`（既定 `claude-opus-4-8`）をそのまま渡す。`temperature`/`top_p`/`budget_tokens` は付けない。
+- 応答: `{ rationale: string, actions: AgentAction[] }` の JSON を期待し、**contracts の Zod スキーマ
+  （`AgentAction`）で検証**する。次のいずれでも必ず **HOLD にフォールバック**し、発注せずループを継続する
+  （例外を上位に投げない。spec §8/§9 暴走防止）:
+  - 応答が空 / 非 JSON / スキーマ不一致（不正な発注コマンドを含む）
+  - Anthropic API エラー（`Anthropic.APIError` / `RateLimitError` 等）・ネットワーク失敗
+- 失敗時はその旨を stderr（`logger.warn`/`error`）に出すが、鍵・観測の生データを過剰に晒さない。
+
+テストは実 LLM・実ネットワーク・実 Redis を使わず、Anthropic SDK の `messages.create` を
+フェイク/モックに差し替えて検証する（CLAUDE.md §3）。`provider-factory` のキー有無による分岐も
+注入 env で検証する。
 
 ## 暴走防止（§8 / §9）
 
@@ -52,9 +68,10 @@ LLM 判断は `DecisionProvider { decide(input): Promise<{ rationale, actions }>
 
 ## LLM コスト注記（spec §2.7 / CLAUDE.md §8）
 
-自律ループは `provider=llm` の場合 **LLM 呼び出し料金が発生**する。アプリのインフラの
-ローカル・無料制約（§0）はインフラに対するもので、LLM 利用料は別枠。頻度（cron）・
-モデル（`AGENT_LLM_MODEL`）・1 ループ発注数を設定で抑制し、既定は控えめにしている。
+自律ループは `provider=llm` かつ `ANTHROPIC_API_KEY` 設定時に **Anthropic Claude の API を呼び、
+LLM 利用料が発生**する（`@anthropic-ai/sdk` 経由）。アプリのインフラのローカル・無料制約（§0）は
+インフラに対するもので、LLM 利用料は別枠。既定は控えめ（`provider=hold`・無課金、`enabled=false`、
+1 日 1 回 cron）。頻度（cron）・モデル（`AGENT_LLM_MODEL`）・1 ループ発注数を設定で抑制できる。
 
 ## 環境変数
 
@@ -65,13 +82,13 @@ LLM 判断は `DecisionProvider { decide(input): Promise<{ rationale, actions }>
 | `AGENT_RUNNER_REQUEST_TIMEOUT_MS` | `15000` | api 呼び出しタイムアウト（ms） |
 | `AGENT_RUNNER_ACCOUNT_ID` | `""` | 回す AGENT 口座 ID |
 | `AGENT_RUNNER_PROFILE_ID` | `""` | 発注主体のエージェントプロファイル ID（監査証跡に必須） |
-| `AGENT_RUNNER_PROVIDER` | `hold` | 判断プロバイダ（`hold` / `llm`） |
-| `AGENT_LLM_MODEL` | `claude-opus-4-8` | 判断に用いる LLM モデル名 |
+| `AGENT_RUNNER_PROVIDER` | `hold` | 判断プロバイダ（`hold`=無LLM / `llm`=実LLM・課金、要 `ANTHROPIC_API_KEY`） |
+| `AGENT_LLM_MODEL` | `claude-opus-4-8` | 判断に用いる LLM モデル名（`provider=llm` で Anthropic に渡す） |
 | `AGENT_RUNNER_CRON` | `0 0 * * *` | 自律ループの cron（既定 1 日 1 回） |
 | `AGENT_RUNNER_MAX_ACTIONS` | `3` | 1 ループの最大発注（ORDER/CANCEL）数 |
 | `AGENT_RUNNER_SCHEDULE_ENABLED` | `true` | 繰り返し登録するか（false なら consumer のみ） |
 | `REDIS_URL` | `redis://localhost:6379` | BullMQ 接続 URL |
-| `ANTHROPIC_API_KEY` | `""` | 実 LLM 実装の API キー（`provider=llm` 用・秘密情報） |
+| `ANTHROPIC_API_KEY` | `""` | Anthropic Claude の API キー（`provider=llm` 用・秘密情報）。SDK が自動解決。未設定なら `provider=llm` でも HOLD にフォールバック（無課金） |
 
 秘密情報（LLM キー）は `.env`（コミット禁止）にのみ置く。`.env.example` には項目だけ記載。
 

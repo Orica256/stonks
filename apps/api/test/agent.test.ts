@@ -74,6 +74,24 @@ describe("apps/api agent trading", () => {
     profileId = res.body.id as string;
   });
 
+  it("lists agent profiles (agent-runner reads profiles as authority)", async () => {
+    const res = await request(app.getHttpServer()).get("/agents").expect(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body.some((p: { id: string }) => p.id === profileId)).toBe(true);
+  });
+
+  it("gets a single agent profile by id", async () => {
+    const res = await request(app.getHttpServer())
+      .get(`/agents/${profileId}`)
+      .expect(200);
+    expect(res.body.id).toBe(profileId);
+    expect(res.body.name).toBe("test-strategy");
+  });
+
+  it("returns 404 for an unknown agent profile id", async () => {
+    await request(app.getHttpServer()).get("/agents/does-not-exist").expect(404);
+  });
+
   it("submits a rationale-backed decision and places the order", async () => {
     const res = await request(app.getHttpServer())
       .post(`/accounts/${accountId}/agent-decisions`)

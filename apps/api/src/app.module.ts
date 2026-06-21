@@ -5,6 +5,7 @@ import { MarketDataModule } from "./market-data/market-data.module.js";
 import { PortfolioModule } from "./portfolio/portfolio.module.js";
 import { TradingModule } from "./trading/trading.module.js";
 import { AnalyticsModule } from "./analytics/analytics.module.js";
+import { BacktestModule } from "./backtest/backtest.module.js";
 import { AgentModule } from "./agent/agent.module.js";
 
 /**
@@ -19,6 +20,7 @@ import { AgentModule } from "./agent/agent.module.js";
     PortfolioModule,
     TradingModule,
     AnalyticsModule,
+    BacktestModule,
     AgentModule,
   ],
 })

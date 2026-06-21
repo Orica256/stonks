@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { EquityPoint, PortfolioSummary } from "@stonks/contracts";
-import { DefaultPerformanceEvaluator } from "./performance-evaluator.js";
+import {
+  BenchmarkUnavailableError,
+  DefaultPerformanceEvaluator,
+} from "./performance-evaluator.js";
 import { InMemoryPerformanceSnapshotRepository } from "./in-memory-repository.js";
 import { FakePortfolioService, FakePriceProvider } from "./fakes.js";
 
@@ -171,7 +174,38 @@ describe("PerformanceEvaluator.compare", () => {
     expect(cmp.benchmark).toBe("BUY_AND_HOLD");
   });
 
-  it("ベンチ銘柄が未設定なら明示的にエラー", async () => {
+  it("指数ベンチ（TOPIX）も指数銘柄の価格系列で同様に比較する", async () => {
+    // 戦略: 100 -> 90 (-10%)。指数: 2000 -> 2200 (+10%)。超過 = -0.2。
+    const portfolio = new FakePortfolioService({
+      summary: summary("90"),
+      history: points([100, 90]),
+    });
+    const evaluator = new DefaultPerformanceEvaluator({
+      portfolio,
+      priceProvider: new FakePriceProvider(
+        {},
+        {
+          "2026-01-01T00:00:00.000Z": {
+            "topix-idx": { amount: "2000", currency: "JPY" },
+          },
+          "2026-01-02T00:00:00.000Z": {
+            "topix-idx": { amount: "2200", currency: "JPY" },
+          },
+        },
+      ),
+      benchmark: { indexInstrumentId: { TOPIX: "topix-idx" } },
+    });
+    const cmp = await evaluator.compare("acc", "TOPIX", {
+      from: new Date("2026-01-01T00:00:00Z"),
+      to: new Date("2026-01-02T00:00:00Z"),
+    });
+    expect(cmp.strategyReturn).toBeCloseTo(-0.1, 10);
+    expect(cmp.benchmarkReturn).toBeCloseTo(0.1, 10);
+    expect(cmp.excessReturn).toBeCloseTo(-0.2, 10);
+    expect(cmp.benchmark).toBe("TOPIX");
+  });
+
+  it("ベンチ銘柄が未設定なら NOT_CONFIGURED で明示的にエラー", async () => {
     const portfolio = new FakePortfolioService({
       summary: summary("100"),
       history: points([100, 110]),
@@ -186,5 +220,148 @@ describe("PerformanceEvaluator.compare", () => {
         to: new Date("2026-01-02T00:00:00Z"),
       }),
     ).rejects.toThrow(/benchmark instrument/);
+    await expect(
+      evaluator.compare("acc", "TOPIX", {
+        from: new Date("2026-01-01T00:00:00Z"),
+        to: new Date("2026-01-02T00:00:00Z"),
+      }),
+    ).rejects.toMatchObject({
+      name: "BenchmarkUnavailableError",
+      reason: "NOT_CONFIGURED",
+      benchmark: "TOPIX",
+    });
+  });
+
+  it("ベンチ価格データが欠落していれば推測せず PRICE_DATA_MISSING で倒す", async () => {
+    // 戦略エクイティ点は from/to にあるが、ベンチ銘柄の at 価格が未提供。
+    const portfolio = new FakePortfolioService({
+      summary: summary("130"),
+      history: points([100, 130]),
+    });
+    const evaluator = new DefaultPerformanceEvaluator({
+      portfolio,
+      // 時点別オーバーライドも固定価格も無い → getLatestPrice が throw。
+      priceProvider: new FakePriceProvider({}),
+      benchmark: { buyAndHoldInstrumentId: "bench-1" },
+    });
+    const err = await evaluator
+      .compare("acc", "BUY_AND_HOLD", {
+        from: new Date("2026-01-01T00:00:00Z"),
+        to: new Date("2026-01-02T00:00:00Z"),
+      })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BenchmarkUnavailableError);
+    expect((err as BenchmarkUnavailableError).reason).toBe(
+      "PRICE_DATA_MISSING",
+    );
+  });
+
+  it("range 内の戦略エクイティ点が不足なら NO_STRATEGY_EQUITY（0 を捏造しない）", async () => {
+    const portfolio = new FakePortfolioService({
+      summary: summary("100"),
+      history: points([100]), // 1 点のみ → 期間リターンを測れない。
+    });
+    const evaluator = new DefaultPerformanceEvaluator({
+      portfolio,
+      priceProvider: new FakePriceProvider(
+        {},
+        {
+          "2026-01-01T00:00:00.000Z": {
+            "bench-1": { amount: "1000", currency: "JPY" },
+          },
+          "2026-01-02T00:00:00.000Z": {
+            "bench-1": { amount: "1100", currency: "JPY" },
+          },
+        },
+      ),
+      benchmark: { buyAndHoldInstrumentId: "bench-1" },
+    });
+    const err = await evaluator
+      .compare("acc", "BUY_AND_HOLD", {
+        from: new Date("2026-01-01T00:00:00Z"),
+        to: new Date("2026-01-31T00:00:00Z"),
+      })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BenchmarkUnavailableError);
+    expect((err as BenchmarkUnavailableError).reason).toBe("NO_STRATEGY_EQUITY");
+  });
+
+  it("基準点を戦略の実エクイティ点に揃える（公正な同条件比較）", async () => {
+    // 要求 range は 1/1〜1/31 だが、戦略のエクイティ点は 1/10 と 1/20 にしかない。
+    // ベンチも *その同じ 2 時点* の価格で測る（range 端の値は使わない）。
+    const history: EquityPoint[] = [
+      { ts: new Date(Date.UTC(2026, 0, 10)).toISOString(), equity: "100" },
+      { ts: new Date(Date.UTC(2026, 0, 20)).toISOString(), equity: "150" },
+    ];
+    const evaluator = new DefaultPerformanceEvaluator({
+      portfolio: new FakePortfolioService({ summary: summary("150"), history }),
+      priceProvider: new FakePriceProvider(
+        {},
+        {
+          // range 端（1/1, 1/31）にも値を置くが、これは使われてはならない。
+          "2026-01-01T00:00:00.000Z": {
+            "bench-1": { amount: "9999", currency: "JPY" },
+          },
+          "2026-01-31T00:00:00.000Z": {
+            "bench-1": { amount: "1", currency: "JPY" },
+          },
+          // 実エクイティ点の時刻の価格: 200 -> 220 (+10%)。
+          "2026-01-10T00:00:00.000Z": {
+            "bench-1": { amount: "200", currency: "JPY" },
+          },
+          "2026-01-20T00:00:00.000Z": {
+            "bench-1": { amount: "220", currency: "JPY" },
+          },
+        },
+      ),
+      benchmark: { buyAndHoldInstrumentId: "bench-1" },
+    });
+    const cmp = await evaluator.compare("acc", "BUY_AND_HOLD", {
+      from: new Date("2026-01-01T00:00:00Z"),
+      to: new Date("2026-01-31T00:00:00Z"),
+    });
+    // 戦略 +50%、ベンチ +10%（端点 9999/1 を使えば全く違う値になる）。
+    expect(cmp.strategyReturn).toBeCloseTo(0.5, 10);
+    expect(cmp.benchmarkReturn).toBeCloseTo(0.1, 10);
+    expect(cmp.excessReturn).toBeCloseTo(0.4, 10);
+    // 返す range は実際に用いた基準点。
+    expect(cmp.range.from).toBe("2026-01-10T00:00:00.000Z");
+    expect(cmp.range.to).toBe("2026-01-20T00:00:00.000Z");
+  });
+
+  it("評価時点（range.to）以降の価格を使わない（ルックアヘッド禁止）", async () => {
+    // 終端を 1/20 に絞る。1/25 に高い価格があってもベンチに混入してはならない。
+    const history: EquityPoint[] = [
+      { ts: new Date(Date.UTC(2026, 0, 10)).toISOString(), equity: "100" },
+      { ts: new Date(Date.UTC(2026, 0, 20)).toISOString(), equity: "110" },
+      { ts: new Date(Date.UTC(2026, 0, 25)).toISOString(), equity: "999" },
+    ];
+    const evaluator = new DefaultPerformanceEvaluator({
+      portfolio: new FakePortfolioService({ summary: summary("110"), history }),
+      priceProvider: new FakePriceProvider(
+        {},
+        {
+          "2026-01-10T00:00:00.000Z": {
+            "bench-1": { amount: "100", currency: "JPY" },
+          },
+          "2026-01-20T00:00:00.000Z": {
+            "bench-1": { amount: "120", currency: "JPY" },
+          },
+          // 未来（1/25）の価格。使われたら benchmarkReturn が跳ねる。
+          "2026-01-25T00:00:00.000Z": {
+            "bench-1": { amount: "500", currency: "JPY" },
+          },
+        },
+      ),
+      benchmark: { buyAndHoldInstrumentId: "bench-1" },
+    });
+    const cmp = await evaluator.compare("acc", "BUY_AND_HOLD", {
+      from: new Date("2026-01-01T00:00:00Z"),
+      to: new Date("2026-01-20T00:00:00Z"), // 評価時点は 1/20。
+    });
+    // getHistory(range) が 1/25 を除外 → 終端は 1/20。ベンチも 1/20 まで。
+    expect(cmp.range.to).toBe("2026-01-20T00:00:00.000Z");
+    expect(cmp.strategyReturn).toBeCloseTo(0.1, 10);
+    expect(cmp.benchmarkReturn).toBeCloseTo(0.2, 10);
   });
 });

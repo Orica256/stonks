@@ -21,7 +21,31 @@ LLM 呼び出しそのもの・自律ループ実行は持たない（agent-runn
     （**ルックアヘッド禁止**）。勝率は `PortfolioService.getRealizedPnl`（trade 単位。B2）で算出し、
     実現損益が無ければエクイティ上昇比率を代理指標にフォールバック。任意で `PerformanceSnapshotRepository` に永続化。
   - `compare(accountId, benchmark, range)` — 戦略リターン（手数料込みエクイティ由来）と
-    ベンチ（BUY_AND_HOLD/指数）の同条件リターンを比較し超過リターンを返す。
+    ベンチ（BUY_AND_HOLD/指数）の同条件リターンを比較し超過リターンを返す（spec §2.7 P1 / §9）。
+    詳細は下記「ベンチマーク比較」を参照。
+
+## ベンチマーク比較（spec §2.7 P1 / §9）
+`compare(accountId, benchmark, range)` は戦略（口座）とベンチのリターンを**同条件**で比較し、
+`excessReturn = strategyReturn − benchmarkReturn` を返す（型は contracts の `BenchmarkComparison`）。
+
+- **BUY_AND_HOLD**: 設定 `buyAndHoldInstrumentId` の銘柄を期間開始時に全額買い持ちした場合の
+  リターン。`(終値 − 始値) / 始値` の単純リターン。
+- **指数（TOPIX / SP500）**: 設定 `indexInstrumentId[benchmark]` の指数 instrumentId の
+  価格系列（`PriceProvider` IF 経由）から同様に算出。
+- **同条件の保証（公正性）**:
+  - 戦略リターンは range 内の**実エクイティ点**の最初→最後で測る。ベンチも *その同じ 2 点の
+    タイムスタンプ* の価格で測る（nominal な `range.from`/`range.to` ではなく、実データのある境界に
+    揃える）。これで戦略・ベンチの評価期間がずれない。返す `range` は実際に用いた基準点。
+  - 戦略のエクイティは `PortfolioService`（約定・手数料/スリッページ反映後）由来＝**手数料込み**。
+- **ルックアヘッド禁止**: 価格取得は基準点の時刻（`getLatestPrice(id, at)`）まで。評価時点
+  （`range.to`）以降の価格は使わない。`getHistory(range)` が範囲外のエクイティ点を除外する前提。
+- **ベンチ未提供は捏造しない**: 比較が公正に成立しない場合は `BenchmarkUnavailableError`
+  （`reason`）を投げる。値（0 等）を推測して返さない。
+  - `NOT_CONFIGURED` … 当該ベンチの instrumentId 未設定。
+  - `PRICE_DATA_MISSING` … ベンチ銘柄の基準点価格が取得不能（データ欠落）。
+  - `NO_STRATEGY_EQUITY` … range 内の戦略エクイティ点が不足（2 点未満）。
+  - api（`GET /accounts/:id/performance`）はこれを握って `comparison: null` に倒し、スナップショットは
+    常に返す。ベンチ銘柄は `AppConfig.benchmarkInstruments`（buyAndHold/topix/sp500）から DI される。
 
 ## 公平性・不変条件
 - 監査証跡の欠落を許さない: 全発注は rationale 付き `AgentDecision` にひも付く（spec §5.2）。

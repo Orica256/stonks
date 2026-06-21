@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Inject,
+  NotFoundException,
   Param,
   Post,
   Query,
@@ -91,6 +92,8 @@ const newId = (): string => {
 /**
  * AI エージェント取引・成績の REST エンドポイント（spec §6.8 / §2.7）:
  *   POST /agents                          AgentProfile 作成
+ *   GET  /agents                          AgentProfile 一覧（agent-runner がプロファイルを権威取得）
+ *   GET  /agents/:id                      AgentProfile 単体取得（無ければ 404）
  *   POST /accounts/:id/agent-decisions    AI 発注（rationale 必須 → AgentDecision + 発注委譲）
  *   GET  /accounts/:id/decisions          意思決定ログ閲覧（監査証跡）
  *   GET  /accounts/:id/performance?range=  成績スナップショット + ベンチ比較
@@ -121,6 +124,18 @@ export class AgentController {
       createdAt: new Date().toISOString(),
     });
     return this.profiles.create(profile);
+  }
+
+  @Get("agents")
+  listAgents(): Promise<AgentProfile[]> {
+    return this.profiles.list();
+  }
+
+  @Get("agents/:id")
+  async getAgent(@Param("id") id: string): Promise<AgentProfile> {
+    const profile = await this.profiles.getProfile(id);
+    if (!profile) throw new NotFoundException(`agent profile not found: ${id}`);
+    return profile;
   }
 
   @Post("accounts/:id/agent-decisions")

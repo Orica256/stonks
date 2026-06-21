@@ -13,6 +13,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.105.0",
     "@stonks/contracts": "workspace:*",
     "bullmq": "^5.21.2",
     "ioredis": "^5.4.1",
