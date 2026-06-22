@@ -1,6 +1,8 @@
 import type {
+  CorporateAction,
   FxProvider,
   FxRate,
+  GetCorporateActionsRequest,
   Instrument,
   Market,
   MarketDataProvider,
@@ -21,10 +23,15 @@ export class FakeMarketData
   private prices = new Map<string, string>();
   private instruments = new Map<string, Instrument>();
   private bars = new Map<string, PriceBar[]>();
+  private corporateActions = new Map<string, CorporateAction[]>();
   fxRate = "150";
 
   setInstrument(i: Instrument): void {
     this.instruments.set(i.id, i);
+  }
+
+  setCorporateActions(instrumentId: string, actions: CorporateAction[]): void {
+    this.corporateActions.set(instrumentId, actions);
   }
 
   setPrice(instrumentId: string, last: string): void {
@@ -58,6 +65,18 @@ export class FakeMarketData
 
   async getBars(req: { instrumentId: string }): Promise<PriceBar[]> {
     return this.bars.get(req.instrumentId) ?? [];
+  }
+
+  async getCorporateActions(
+    req: GetCorporateActionsRequest,
+  ): Promise<CorporateAction[]> {
+    const all = this.corporateActions.get(req.instrumentId) ?? [];
+    const from = new Date(req.from).getTime();
+    const to = new Date(req.to).getTime();
+    return all.filter((a) => {
+      const ex = new Date(a.exDate).getTime();
+      return ex >= from && ex <= to;
+    });
   }
 
   async getLatestPrice(instrumentId: string): Promise<Money> {

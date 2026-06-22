@@ -17,6 +17,7 @@ import {
   type AgentObservation,
   type AgentTradingService,
   type BenchmarkComparison,
+  type BenchmarkComparisonResult,
   type PerformanceEvaluator,
   type PerformanceSnapshot,
   type Order,
@@ -173,6 +174,7 @@ export class AgentController {
   ): Promise<{
     snapshot: PerformanceSnapshot;
     comparison: BenchmarkComparison | null;
+    comparisonResult: BenchmarkComparisonResult;
   }> {
     const now = new Date();
     const window = resolveRange(range, from, to, now);
@@ -180,18 +182,23 @@ export class AgentController {
     // スナップショットは window.to 時点で評価（ルックアヘッド防止は評価器が担保）。
     const snapshot = await this.evaluator.snapshot(accountId, window.to);
 
-    // ベンチ比較は要求時のみ。未設定ベンチは評価器が throw するため握って null に倒し、
-    // スナップショットは常に返せるようにする。
+    // ベンチ比較は要求時のみ。比較不能でも理由を失わないよう compareResult を使う
+    // （評価器が throw する代わりに available:false + reason を型付きで返す。spec §2.7 P1）。
     const benchId: BenchmarkId = benchmark
       ? BenchmarkId.parse(benchmark)
       : "BUY_AND_HOLD";
-    let comparison: BenchmarkComparison | null = null;
-    try {
-      comparison = await this.evaluator.compare(accountId, benchId, window);
-    } catch {
-      comparison = null;
-    }
+    const comparisonResult = await this.evaluator.compareResult(
+      accountId,
+      benchId,
+      window,
+    );
 
-    return { snapshot, comparison };
+    // 後方互換: 既存クライアント（web 等）が読む `comparison` は従来どおり
+    // 成立時のみオブジェクト・不成立時 null を維持する。理由は `comparisonResult` 側に載せる。
+    const comparison: BenchmarkComparison | null = comparisonResult.available
+      ? comparisonResult.comparison
+      : null;
+
+    return { snapshot, comparison, comparisonResult };
   }
 }

@@ -142,5 +142,9 @@ describe("apps/api agent trading", () => {
     expect(res.body.snapshot).toHaveProperty("maxDrawdown");
     // ベンチ銘柄未設定のため比較は null に倒れる（スナップショットは常に返る）。
     expect(res.body.comparison).toBeNull();
+    // 後方互換に加え、比較不能の理由を comparisonResult で型付き提示する（spec §2.7 P1）。
+    expect(res.body.comparisonResult.available).toBe(false);
+    expect(res.body.comparisonResult.benchmark).toBe("BUY_AND_HOLD");
+    expect(res.body.comparisonResult.reason).toBe("NOT_CONFIGURED");
   });
 });

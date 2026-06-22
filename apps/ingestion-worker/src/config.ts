@@ -1,4 +1,5 @@
 import type { Timeframe } from "@stonks/contracts";
+import { IntradayTimeframe } from "./jobs.js";
 
 /**
  * env から導出する取込ワーカー設定。
@@ -25,6 +26,12 @@ export interface WorkerConfig {
   backfillTimeframe: Timeframe;
   /** バックフィルの遡及日数。 */
   backfillDays: number;
+  /** 分足取込の cron（既定: 5 分毎）。 */
+  intradayBarsCron: string;
+  /** 定期取込する分足の足種（空なら分足取込を登録しない）。 */
+  intradayTimeframes: IntradayTimeframe[];
+  /** 分足取込で毎回さかのぼる分数（cron 間隔より長くして取りこぼしを防ぐ）。 */
+  intradayLookbackMinutes: number;
 }
 
 const parseIntOr = (raw: string | undefined, fallback: number): number => {
@@ -44,6 +51,20 @@ const parseBool = (raw: string | undefined, fallback: boolean): boolean => {
   return raw === "1" || raw.toLowerCase() === "true";
 };
 
+/** カンマ区切りの足種リストを IntradayTimeframe に絞ってパースする（未知値は無視）。 */
+const parseIntradayTimeframes = (
+  raw: string | undefined,
+  fallback: IntradayTimeframe[],
+): IntradayTimeframe[] => {
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const out: IntradayTimeframe[] = [];
+  for (const part of parseList(raw)) {
+    const parsed = IntradayTimeframe.safeParse(part);
+    if (parsed.success && !out.includes(parsed.data)) out.push(parsed.data);
+  }
+  return out;
+};
+
 /** プロセス環境（または注入された env）からワーカー設定を構築する。 */
 export const loadWorkerConfig = (
   env: Record<string, string | undefined> = process.env,
@@ -57,4 +78,9 @@ export const loadWorkerConfig = (
   universe: parseList(env.INGEST_UNIVERSE),
   backfillTimeframe: "1d",
   backfillDays: parseIntOr(env.INGEST_BACKFILL_DAYS, 365),
+  intradayBarsCron: env.INGEST_INTRADAY_BARS_CRON?.trim() || "*/5 * * * *",
+  intradayTimeframes: parseIntradayTimeframes(env.INGEST_INTRADAY_TIMEFRAMES, [
+    "1m",
+  ]),
+  intradayLookbackMinutes: parseIntOr(env.INGEST_INTRADAY_LOOKBACK_MIN, 120),
 });

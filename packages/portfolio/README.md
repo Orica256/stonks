@@ -23,6 +23,15 @@
     `estimateCapitalGainsTax` に委譲し、自前で率計算しない。
   - **免責**: これは確定申告の正確計算ではなく**シミュレーション上の概算**（CLAUDE.md §7。投資助言ではない）。
     概算税の現金台帳（TAX）への反映は本サービスでは行わない（反映タイミング等は portfolio/api の判断）。
+- `applyCorporateAction(accountId, action)` — コーポレートアクション適用（spec §2.1 P1 分割 / §2.3 P1 配当。Phase 4）。
+  当該口座の当該銘柄を**保有しているときのみ**作用（未保有=数量 0 は no-op）。評価時刻は `action.exDate`（UTC）。
+  - **DIVIDEND**: `配当額 = 保有数量 × action.value`（1 株あたり配当）を**建玉通貨**で現金へ加算し、
+    `CashLedgerEntry(DIVIDEND)`（refId=`div:<instrumentId>:<exDate>`）を 1 件記録。ポジション/税ロットは不変。
+    源泉徴収・配当課税・端株処理は行わず**額面どおり**受領する簡略方針（CLAUDE.md §7 免責。投資助言ではない）。
+  - **SPLIT**: `action.value` を**分割比率**として解釈（`"2"`=1→2 の 2 分割、`"0.5"`=2→1 の併合）。
+    `quantity` を `×比率`（整数株前提で四捨五入）、`avgCost` を `÷比率`（丸めず）に調整し、
+    **建玉簿価（quantity × avgCost）は不変**。税ロットがあれば `quantity`/`remainingQuantity` を `×比率`、
+    `costBasis` を `÷比率` に調整し建玉合計と整合させる。現金・実現損益は動かさない。比率 ≤ 0 は `VALIDATION` で拒否。
 - `RepositoryAccountStateProvider` — contracts `AccountStateProvider`（現金/保有読み取り IF・B2）の実装。
   trading-engine の発注前チェックに注入する。
 
@@ -35,7 +44,8 @@
 - 現物の売り越し（保有数量超の売却）を拒否。
 
 ## 入出力
-- 入力: `Trade`（trading-engine 由来）と評価用の価格/為替（PriceProvider / FxProvider IF 経由）。
+- 入力: `Trade`（trading-engine 由来）、`CorporateAction`（配当/分割。market-data 由来。spec §2.1/§2.3）、
+  評価用の価格/為替（PriceProvider / FxProvider IF 経由）。
 - 出力: `PositionView` / `PortfolioSummary` / `EquityPoint` / `Trade` / `RealizedPnl` / `TaxLot` /
   `CapitalGainsTaxEstimate`（contracts のスキーマに準拠）。
   `Position` は `currency` を自己記述的に持つ（B3。内部 instrument→currency マップは撤去済み）。

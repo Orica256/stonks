@@ -25,6 +25,18 @@ describe("dispatch", () => {
     expect(res.written).toBe(0);
   });
 
+  it("ingest-intraday-bars をハンドラへ振り分け、デフォルトを補完する", async () => {
+    const d = deps();
+    const res = (await dispatch(d, {
+      name: JOB.IngestIntradayBars,
+      data: { instrumentId: "NASDAQ:AAPL" },
+    })) as { written: number; skipped: boolean };
+    // 2026-06-19 14:00Z は NY 場中 → スキップせず getBars（フェイクは空配列）
+    expect(res.skipped).toBe(false);
+    expect(res.written).toBe(0);
+    expect(d.market.barsCalls[0]?.timeframe).toBe("1m"); // 既定 1m
+  });
+
   it("poll-quote のデフォルト値（force/market）を Zod で補完する", async () => {
     const d = deps();
     const res = (await dispatch(d, {

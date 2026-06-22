@@ -57,6 +57,19 @@ export const GetBarsRequest = z.object({
 export type GetBarsRequest = z.infer<typeof GetBarsRequest>;
 
 /**
+ * 配当/分割（コーポレートアクション）取得リクエスト（B12。spec §6.1）。
+ * `from`/`to` は UTC。`exDate` がこの期間に入る `CorporateAction` を取得する。
+ */
+export const GetCorporateActionsRequest = z.object({
+  instrumentId: Id,
+  from: Timestamp,
+  to: Timestamp,
+});
+export type GetCorporateActionsRequest = z.infer<
+  typeof GetCorporateActionsRequest
+>;
+
+/**
  * market-data モジュールが実装する公開契約（spec §6.1）。
  * 外部 API の差異はこの実装の内側に閉じ込める。
  */
@@ -64,6 +77,19 @@ export interface MarketDataProvider {
   searchInstruments(q: string, market?: Market): Promise<Instrument[]>;
   getQuote(instrumentId: string): Promise<Quote>;
   getBars(req: GetBarsRequest): Promise<PriceBar[]>;
+
+  /**
+   * 配当/分割（コーポレートアクション）を取得する（B12。spec §6.1）。
+   * `exDate` が `req.from`〜`req.to`（UTC）に入るものを返す。
+   *
+   * 後方互換のため optional。既存の MarketDataProvider 実装（market-data の
+   * MarketDataRegistry / apps の フェイク）はこのメソッドを持たないため必須化すると
+   * 壊れる。実装可能なアダプタ/プロバイダのみが提供する（未提供は ingestion 側で
+   * スキップ or フォールバック）。提供アダプタが揃ったら必須化を domain-architect と検討。
+   */
+  getCorporateActions?(
+    req: GetCorporateActionsRequest,
+  ): Promise<CorporateAction[]>;
 }
 
 /**

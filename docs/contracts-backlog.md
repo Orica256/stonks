@@ -180,8 +180,50 @@
 ### B11. `IndicatorSpec.params` の discriminated union 化
 - 現在 `z.record(z.number())` で MACD の fast/slow/signal も同居。kind 別 union 化で型安全性が上がる（現契約でも実装可）。
 
-### B12. `CorporateAction` 取得 IF
+### B12. `CorporateAction` 取得 IF ✅ 対応済み
 - 型はあるが `MarketDataProvider` に取得メソッドが無い（分割/配当の取り込み）。Phase 1 で IF 追加を提案。
+- → 対応済み（Phase 4）: `market-data.ts` に `GetCorporateActionsRequest`（`GetBarsRequest` に倣う。`instrumentId`/`from`/`to`、UTC）を追加し、`MarketDataProvider.getCorporateActions?(req): Promise<CorporateAction[]>` を **optional メソッド**として追加。理由: 唯一の具象実装 `MarketDataRegistry` と apps のフェイクが `implements MarketDataProvider` のため、必須化すると両者が壊れる。レジストリはアダプタの method 有無で `candidates` をフィルタするので、対応アダプタのみ提供できる設計と整合（未提供は ingestion 側でスキップ/フォールバック）。対応アダプタが揃ったら必須化を検討。
+
+## Phase 4 契約: 配当/分割の取得・適用 + ベンチ比較不能の契約化 ✅ 反映済み
+
+> spec §2.1 P1（分割調整）/ §2.3 P1（配当受取）/ §2.7 P1（ベンチ比較）と B12 に対応。
+> **すべて追加的・後方互換**（optional メソッド/新規型のみ。Phase 2/3 の全テストを壊さない）。
+
+### 追加した型/IF（`packages/contracts`）
+- `market-data.ts`:
+  - `GetCorporateActionsRequest`（Zod。`instrumentId`/`from`/`to`、UTC）。
+  - `MarketDataProvider.getCorporateActions?(req): Promise<CorporateAction[]>`（**optional**。B12 参照）。
+- `portfolio.ts`:
+  - `PortfolioService.applyCorporateAction?(accountId, action: CorporateAction): Promise<void>`（**optional**）。
+    DIVIDEND=保有数量×1株配当を `CashLedger(DIVIDEND)` で現金反映、SPLIT=数量/平均取得単価を比率調整（建玉価値不変）。
+    源泉徴収・配当課税・端株の現金処理は概算スコープ外（CLAUDE.md §7 免責）と JSDoc に明記。
+    `CorporateAction` は `market-data.js` から type import（契約の二重管理なし）。
+- `agent.ts`:
+  - `BenchmarkUnavailableReason`（Zod enum `NOT_CONFIGURED|PRICE_DATA_MISSING|NO_STRATEGY_EQUITY`＋型）。
+    agent-trader の `performance-evaluator.ts` の同名 string union を契約化したもの（値は完全一致）。
+  - `BenchmarkComparisonResult`（discriminated union on `available`）:
+    `{ available: true, comparison: BenchmarkComparison } | { available: false, benchmark: BenchmarkId, reason: BenchmarkUnavailableReason }`。
+    既存 `BenchmarkComparison`（成立時の数値のみ）は**破壊せず据え置き**、不成立を理由付きで返すラッパとして新設。
+
+### DB（`packages/db`）
+- **変更なし**。IF 追加のみで永続スキーマ要件は増えない（`CorporateAction`/`CashLedger(DIVIDEND)` は spec §5.1 既存。
+  実際の CorporateAction 永続テーブルが必要になるのは ingestion 実装時で、今回の契約追加だけでは不要＝過剰設計しない）。
+
+### 後続実装担当への申し送り
+- **market-data**: `MarketDataRegistry` に `getCorporateActions(req: GetCorporateActionsRequest)` を実装（対応アダプタの
+  フォールバックチェーンで取得。`exDate` が `from`〜`to` に入るものに絞る）。アダプタ側に対応メソッドが無ければ
+  そのアダプタは候補から外れる（既存 `candidates` のパターン）。対応プロバイダが揃ったら optional の必須化を相談。
+- **portfolio**: `applyCorporateAction(accountId, action)` を実装。DIVIDEND は建玉通貨で `qty × value` を現金加算し
+  `CashLedgerEntry(DIVIDEND, refId=action)` を起こす。SPLIT は `Position.quantity`/`avgCost` を比率調整（quantity×avgCost 不変）。
+  税ロット（`TaxLot`）保有時は SPLIT で各ロットの数量/取得単価も比率調整すること（concern: 端数の丸め方針を一貫させる）。
+  概算スコープにつき源泉徴収・配当課税は行わない。実装後 optional の必須化を相談。
+- **agent-trader**: `performance-evaluator.ts` のローカル `BenchmarkUnavailableReason` を contracts の同名 enum 型に置換可
+  （値は同一。`BenchmarkUnavailableError.reason` の型を contracts 由来にすると api 側と一貫）。`compare` の戻りは
+  既存 `BenchmarkComparison`（throw で不成立表現）のままで後方互換。`BenchmarkComparisonResult` を返す薄いラッパ
+  （throw→`{available:false, reason}` 変換）を agent-trader か api のどちらに置くかは実装で決める。
+- **api / web**: api は `BenchmarkUnavailableError` を握り潰して `comparison: null` にする代わりに、
+  `BenchmarkComparisonResult` で `{available:false, benchmark, reason}` を返せる。web は `reason` で
+  「未設定/データ欠落/エクイティ不足」を型付きでユーザーに提示（推測リターンを出さない。spec §9 公正性）。
 
 ## ツール債務（契約ではないが要対応）
 

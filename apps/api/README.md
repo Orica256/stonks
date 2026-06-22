@@ -18,6 +18,7 @@ REST + SSE を公開する。**横依存は作らず、結合は contracts の I
 | GET | `/instruments?q=&market=` | 銘柄検索 |
 | GET | `/instruments/:id/bars?timeframe=&from=&to=` | OHLCV バー取得 |
 | GET | `/instruments/:id/quote` | 最新気配 |
+| GET | `/instruments/:id/corporate-actions?from=&to=` | 配当/分割の取得（`exDate` が範囲内の `CorporateAction[]`。range 未指定は直近 1 年。未対応プロバイダは 501） |
 | GET | `/quotes/stream?ids=a,b` | 価格ストリーム（SSE・短間隔ポーリング） |
 | POST | `/accounts/:id/orders` | 発注（`PlaceOrderCommand`） |
 | DELETE | `/orders/:id` | 注文取消 |
@@ -27,6 +28,7 @@ REST + SSE を公開する。**横依存は作らず、結合は contracts の I
 | GET | `/accounts/:id/summary` | 総資産サマリ |
 | GET | `/accounts/:id/history?from=&to=` | エクイティ推移 |
 | GET | `/accounts/:id/tax?from=&to=` | 譲渡益課税の概算（通貨別 `CapitalGainsTaxEstimate[]`。既定率 20.315%。range 未指定は年初来） |
+| POST | `/accounts/:id/corporate-actions` | コーポレートアクション反映（body=`CorporateAction`。配当→現金/台帳、分割→ポジション調整。未対応サービスは 501） |
 | POST | `/instruments/:id/indicators` | バー取得→テクニカル指標計算 |
 | POST | `/backtests` | バックテスト実行（`RunBacktestRequest` → `BacktestResult`。損益・最大DD・シャープ・勝率） |
 | POST | `/agents` | AgentProfile 作成（id/createdAt はサーバ採番） |
@@ -35,12 +37,17 @@ REST + SSE を公開する。**横依存は作らず、結合は contracts の I
 | POST | `/accounts/:id/agent-decisions` | AI 発注（`rationale` 必須 → AgentDecision 記録＋発注委譲） |
 | GET | `/accounts/:id/decisions` | 意思決定ログ閲覧（監査証跡） |
 | GET | `/accounts/:id/observation` | 自律ループ向け観測（市況/保有/成績の要約） |
-| GET | `/accounts/:id/performance?range=&from=&to=&benchmark=` | 成績スナップショット＋ベンチ比較 |
+| GET | `/accounts/:id/performance?range=&from=&to=&benchmark=` | 成績スナップショット＋ベンチ比較（`{ snapshot, comparison, comparisonResult }`。`comparison` は後方互換で成立時のみ非 null、`comparisonResult` は不成立理由を型付き提示） |
 
 > agent 系は agent-trader（`AgentTradingService` / `PerformanceEvaluator`）へ委譲し、
 > trading-engine / portfolio を直接呼ばない（spec §4.3 / §8）。`agent-decisions` は
 > rationale 必須で、発注は必ず AgentDecision に紐づく（spec §5.2 監査証跡）。
-> backtests（spec §6.8）は Phase 3 で backtest を投入する際に追加する。
+> `performance` のベンチ比較は `PerformanceEvaluator.compareResult` 経由。比較不能でも throw を
+> 握り潰して `comparison: null` にする代わりに、`comparisonResult`（`available:false` + `reason`）で
+> 理由を型付き提示する（spec §2.7 P1）。
+> corporate-actions の 2 本は spec §6.8 一覧外の P1 補助ルート（/history /tax と同扱い）。
+> GET は market-data の `getCorporateActions`、POST は portfolio の `applyCorporateAction`（ともに
+> contracts 上 optional）へ委譲し、未実装の供給先には 501 を返す（誤データを捏造しない）。
 
 ## 結線の要点
 

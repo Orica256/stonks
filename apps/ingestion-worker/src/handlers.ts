@@ -8,6 +8,7 @@ import { isMarketOpen } from "@stonks/core-domain";
 import type {
   BackfillBarsPayload,
   FetchFxRatePayload,
+  IngestIntradayBarsPayload,
   PollQuotePayload,
 } from "./jobs.js";
 import type { IngestionRepository } from "./repository.js";
@@ -59,6 +60,43 @@ export const handleBackfillBars = async (
     `[backfill-bars] ${payload.instrumentId} ${payload.timeframe} ${payload.from}..${payload.to} -> ${written} bars`,
   );
   return { written };
+};
+
+/**
+ * 分足 OHLCV 取込（1m/5m/15m/1h）。
+ *
+ * 実行時刻から `lookbackMinutes` 遡った直近ウィンドウを `getBars` で取得し upsert する。
+ * 期間を payload に固定せずここで算出するため repeatable cron でローリング取込できる。
+ * 休場中は無料枠の呼び出しを節約するため既定でスキップ（force で強制）。
+ * 取得・正規化・レート制御・フォールバックは market-data 側に委譲する（CLAUDE.md §4）。
+ */
+export const handleIngestIntradayBars = async (
+  deps: HandlerDeps,
+  payload: IngestIntradayBarsPayload,
+): Promise<{ written: number; skipped: boolean }> => {
+  const now = (deps.now ?? (() => new Date()))();
+  const market = marketOf(payload.instrumentId);
+  if (!payload.force && market && !isMarketOpen(market, now)) {
+    deps.logger?.info?.(
+      `[ingest-intraday-bars] ${payload.instrumentId} ${payload.timeframe} skipped (market ${market} closed)`,
+    );
+    return { written: 0, skipped: true };
+  }
+  const to = now.toISOString();
+  const from = new Date(
+    now.getTime() - payload.lookbackMinutes * 60 * 1000,
+  ).toISOString();
+  const bars = await deps.market.getBars({
+    instrumentId: payload.instrumentId,
+    timeframe: payload.timeframe,
+    from,
+    to,
+  });
+  const written = await deps.repo.saveBars(bars);
+  deps.logger?.info?.(
+    `[ingest-intraday-bars] ${payload.instrumentId} ${payload.timeframe} ${from}..${to} -> ${written} bars`,
+  );
+  return { written, skipped: false };
 };
 
 /**

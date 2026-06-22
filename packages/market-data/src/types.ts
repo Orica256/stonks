@@ -1,6 +1,8 @@
 import type {
+  CorporateAction,
   FxRate,
   GetBarsRequest,
+  GetCorporateActionsRequest,
   Instrument,
   Market,
   PriceBar,
@@ -26,6 +28,15 @@ export interface ProviderAdapter {
   searchInstruments?(q: string, market?: Market): Promise<Instrument[]>;
   getQuote?(instrumentId: string): Promise<Quote>;
   getBars?(req: GetBarsRequest): Promise<PriceBar[]>;
+
+  /**
+   * 配当/分割（コーポレートアクション）を取得する（spec §2.1 P1, §6.1）。
+   * `exDate` が `req.from`〜`req.to`（UTC）に入るものを返す。未対応アダプタは
+   * このメソッドを持たず、レジストリの候補から自動で外れる（getBars 等と同パターン）。
+   */
+  getCorporateActions?(
+    req: GetCorporateActionsRequest,
+  ): Promise<CorporateAction[]>;
 }
 
 /** 為替専用アダプタ（USD/JPY）。 */

@@ -1,7 +1,9 @@
 import type {
+  CorporateAction,
   FxProvider,
   FxRate,
   GetBarsRequest,
+  GetCorporateActionsRequest,
   Instrument,
   Market,
   MarketDataProvider,
@@ -116,6 +118,30 @@ export class MarketDataRegistry
       (a) => a.getBars!(req),
       `getBars(${req.instrumentId})`,
     );
+  }
+
+  /**
+   * 配当/分割（コーポレートアクション）を取得する（spec §2.1 P1, §6.1）。
+   *
+   * getBars と同じフォールバックチェーン＋候補フィルタに乗せる。
+   * getCorporateActions を実装するアダプタ（J-Quants 優先・Yahoo フォールバック）
+   * のみが候補となり、対応アダプタが無ければ PROVIDER_UNAVAILABLE を投げる。
+   * 念のため `exDate` を `req.from`〜`req.to`（UTC）で再フィルタしてから返す。
+   */
+  async getCorporateActions(
+    req: GetCorporateActionsRequest,
+  ): Promise<CorporateAction[]> {
+    const actions = await this.fallback(
+      this.candidates("getCorporateActions", req.instrumentId),
+      (a) => a.getCorporateActions!(req),
+      `getCorporateActions(${req.instrumentId})`,
+    );
+    const fromMs = new Date(req.from).getTime();
+    const toMs = new Date(req.to).getTime();
+    return actions.filter((ca) => {
+      const ex = new Date(ca.exDate).getTime();
+      return ex >= fromMs && ex <= toMs;
+    });
   }
 
   /**

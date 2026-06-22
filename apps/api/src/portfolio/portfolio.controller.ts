@@ -1,26 +1,30 @@
 import {
+  Body,
   Controller,
   Get,
   Inject,
   NotImplementedException,
   Param,
+  Post,
   Query,
 } from "@nestjs/common";
-import type {
-  CapitalGainsTaxEstimate,
-  EquityPoint,
-  PortfolioService,
-  PortfolioSummary,
-  PositionView,
+import {
+  CorporateAction,
+  type CapitalGainsTaxEstimate,
+  type EquityPoint,
+  type PortfolioService,
+  type PortfolioSummary,
+  type PositionView,
 } from "@stonks/contracts";
 import { TOKENS } from "../common/tokens.js";
 
 /**
  * ポートフォリオ REST エンドポイント（spec §6.8）:
- *   GET /accounts/:id/positions
- *   GET /accounts/:id/summary
- *   GET /accounts/:id/history?from=&to=
- *   GET /accounts/:id/tax?from=&to=   (譲渡益課税の概算。spec §2.3 P1)
+ *   GET  /accounts/:id/positions
+ *   GET  /accounts/:id/summary
+ *   GET  /accounts/:id/history?from=&to=
+ *   GET  /accounts/:id/tax?from=&to=   (譲渡益課税の概算。spec §2.3 P1)
+ *   POST /accounts/:id/corporate-actions   (配当→現金/台帳・分割→ポジション調整。spec §2.3 P1)
  */
 @Controller("accounts/:id")
 export class PortfolioController {
@@ -83,5 +87,28 @@ export class PortfolioController {
       from: fromDate,
       to: toDate,
     });
+  }
+
+  /**
+   * コーポレートアクション（配当/分割）を口座へ反映する（spec §2.3 P1。spec §6.8 一覧外の補助ルート）。
+   * 配当 → 建玉通貨で現金受領 + `CashLedgerEntry(DIVIDEND)`、分割 → ポジション数量/平均取得単価を調整。
+   *
+   * body は contracts の `CorporateAction` スキーマで検証（手書き型と二重管理しない。CLAUDE.md §2）。
+   * `applyCorporateAction` は PortfolioService 契約上 optional のため、未実装の実装が注入された場合は
+   * 501 を返す（既定の DefaultPortfolioService は実装済み。/tax と同じ optional ガード流儀）。
+   */
+  @Post("corporate-actions")
+  async applyCorporateAction(
+    @Param("id") accountId: string,
+    @Body() body: unknown,
+  ): Promise<{ ok: true }> {
+    if (!this.portfolio.applyCorporateAction) {
+      throw new NotImplementedException(
+        "corporate actions are not supported by this portfolio service",
+      );
+    }
+    const action: CorporateAction = CorporateAction.parse(body);
+    await this.portfolio.applyCorporateAction(accountId, action);
+    return { ok: true };
   }
 }

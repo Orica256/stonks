@@ -2,7 +2,10 @@ import type {
   AgentDecision,
   BacktestResult,
   BenchmarkComparison,
+  BenchmarkComparisonResult,
+  BenchmarkId,
   CapitalGainsTaxEstimate,
+  CorporateAction,
   EquityPoint,
   Instrument,
   Market,
@@ -21,11 +24,16 @@ import { apiRequest } from "./client";
 
 /**
  * `GET /accounts/:id/performance` のレスポンス（apps/api）。
- * 成績スナップショットとベンチ比較（未設定ベンチは null）を併せて返す（spec §6.8）。
+ * 成績スナップショットとベンチ比較を併せて返す（spec §6.8）。
+ *
+ * `comparison` は従来どおりの後方互換キー（未成立は null）。
+ * `comparisonResult` は新規（成立/不成立を理由付きで表現する discriminated union）。
+ * UI の理由提示は `comparisonResult` を正準とする（推測リターンを出さない・spec §2.7 P1）。
  */
 export interface PerformanceResult {
   snapshot: PerformanceSnapshot;
   comparison: BenchmarkComparison | null;
+  comparisonResult: BenchmarkComparisonResult;
 }
 
 /**
@@ -157,11 +165,12 @@ export function getCapitalGainsTax(
 export function getPerformance(
   accountId: string,
   range?: string,
+  benchmark?: BenchmarkId,
   signal?: AbortSignal,
 ): Promise<PerformanceResult> {
   return apiRequest<PerformanceResult>(
     `/accounts/${encodeURIComponent(accountId)}/performance`,
-    { query: { range }, signal },
+    { query: { range, benchmark }, signal },
   );
 }
 
@@ -172,6 +181,39 @@ export function getDecisions(
   return apiRequest<AgentDecision[]>(
     `/accounts/${encodeURIComponent(accountId)}/decisions`,
     { signal },
+  );
+}
+
+// ── corporate actions（spec §2.3 / market-data）──
+
+/**
+ * `GET /instruments/:id/corporate-actions?from=&to=`。
+ * 指定銘柄の配当・分割イベント（`exDate` が期間内）を取得する。
+ * 期間無指定時は API 側の既定範囲に委ねる。戻り値は契約型そのまま（手書きしない）。
+ */
+export function getCorporateActions(
+  instrumentId: string,
+  range?: { from?: string; to?: string },
+  signal?: AbortSignal,
+): Promise<CorporateAction[]> {
+  return apiRequest<CorporateAction[]>(
+    `/instruments/${encodeURIComponent(instrumentId)}/corporate-actions`,
+    { query: { from: range?.from, to: range?.to }, signal },
+  );
+}
+
+/**
+ * `POST /accounts/:id/corporate-actions`（body=`CorporateAction`）。
+ * コーポレートアクションを口座へ反映する（配当→現金/台帳、分割→ポジション調整は api が実施）。
+ * 投資助言ではなくシミュレーション上の反映操作（CLAUDE.md §7）。
+ */
+export function applyCorporateAction(
+  accountId: string,
+  action: CorporateAction,
+): Promise<{ ok: true }> {
+  return apiRequest<{ ok: true }>(
+    `/accounts/${encodeURIComponent(accountId)}/corporate-actions`,
+    { method: "POST", body: action },
   );
 }
 

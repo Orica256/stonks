@@ -43,8 +43,8 @@ describe("createIngestionRuntime", () => {
     const config = loadWorkerConfig({ INGEST_UNIVERSE: "TSE:7203,NASDAQ:AAPL" });
     const rt = createIngestionRuntime({ config, deps: deps(), logger: silentLog });
     await rt.registerSchedules();
-    // 2 銘柄 poll-quote + 1 FX = 3 件、すべて repeat 付き
-    expect(addMock).toHaveBeenCalledTimes(3);
+    // 2 銘柄 poll-quote + 2 銘柄 分足取込(1m) + 1 FX = 5 件、すべて repeat 付き
+    expect(addMock).toHaveBeenCalledTimes(5);
     for (const call of addMock.mock.calls) {
       expect(call[2]).toHaveProperty("repeat");
       expect(call[2]).toHaveProperty("jobId");

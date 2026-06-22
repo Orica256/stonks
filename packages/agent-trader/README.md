@@ -22,7 +22,12 @@ LLM 呼び出しそのもの・自律ループ実行は持たない（agent-runn
     実現損益が無ければエクイティ上昇比率を代理指標にフォールバック。任意で `PerformanceSnapshotRepository` に永続化。
   - `compare(accountId, benchmark, range)` — 戦略リターン（手数料込みエクイティ由来）と
     ベンチ（BUY_AND_HOLD/指数）の同条件リターンを比較し超過リターンを返す（spec §2.7 P1 / §9）。
+    比較不能時は値を捏造せず `BenchmarkUnavailableError` を throw する（後方互換のため据え置き）。
     詳細は下記「ベンチマーク比較」を参照。
+  - `compareResult(accountId, benchmark, range)` — `compare` のラッパ。`BenchmarkUnavailableError` を
+    捕捉し、理由付きの `BenchmarkComparisonResult`（contracts の discriminated union）を返す。
+    成立時 `{ available: true, comparison }`、不成立時 `{ available: false, benchmark, reason }`。
+    `BenchmarkUnavailableError` 以外（インフラ障害等）は捕捉せず再送出する。api はこれを使う。
 
 ## ベンチマーク比較（spec §2.7 P1 / §9）
 `compare(accountId, benchmark, range)` は戦略（口座）とベンチのリターンを**同条件**で比較し、
@@ -39,13 +44,22 @@ LLM 呼び出しそのもの・自律ループ実行は持たない（agent-runn
   - 戦略のエクイティは `PortfolioService`（約定・手数料/スリッページ反映後）由来＝**手数料込み**。
 - **ルックアヘッド禁止**: 価格取得は基準点の時刻（`getLatestPrice(id, at)`）まで。評価時点
   （`range.to`）以降の価格は使わない。`getHistory(range)` が範囲外のエクイティ点を除外する前提。
-- **ベンチ未提供は捏造しない**: 比較が公正に成立しない場合は `BenchmarkUnavailableError`
-  （`reason`）を投げる。値（0 等）を推測して返さない。
+- **ベンチ未提供は捏造しない**: 比較が公正に成立しない場合は値（0 等）を推測して返さず、
+  `reason` で「比較不能」を明示する。`reason` の型は contracts の `BenchmarkUnavailableReason`
+  （enum。agent-trader 側で再定義しない）。
   - `NOT_CONFIGURED` … 当該ベンチの instrumentId 未設定。
   - `PRICE_DATA_MISSING` … ベンチ銘柄の基準点価格が取得不能（データ欠落）。
   - `NO_STRATEGY_EQUITY` … range 内の戦略エクイティ点が不足（2 点未満）。
-  - api（`GET /accounts/:id/performance`）はこれを握って `comparison: null` に倒し、スナップショットは
-    常に返す。ベンチ銘柄は `AppConfig.benchmarkInstruments`（buyAndHold/topix/sp500）から DI される。
+- **2 つの返し方**:
+  - `compare(...)` … 比較不能を `BenchmarkUnavailableError`（`benchmark` / `reason`）で **throw**。
+    既存挙動。throw を自前で扱いたい呼び出し側向け。
+  - `compareResult(...)` … 上記エラーを捕捉し、理由付きの `BenchmarkComparisonResult` を **返す**
+    （contracts の discriminated union）。成立 `{ available: true, comparison }` /
+    不成立 `{ available: false, benchmark, reason }`。**api はこちらを使う**ことで、理由を握り潰さず
+    型付きでクライアントへ提示できる（従来の `comparison: null` 化では理由が失われていた）。
+    ベンチ銘柄は `AppConfig.benchmarkInstruments`（buyAndHold/topix/sp500）から DI される。
+  - 注: contracts の `PerformanceEvaluator` IF には `snapshot` / `compare` のみ定義。`compareResult` は
+    具象 `DefaultPerformanceEvaluator` の公開メソッド（IF 非拡張）。api は具象型 or 拡張 IF で受ける。
 
 ## 公平性・不変条件
 - 監査証跡の欠落を許さない: 全発注は rationale 付き `AgentDecision` にひも付く（spec §5.2）。

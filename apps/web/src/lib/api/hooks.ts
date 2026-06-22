@@ -8,7 +8,9 @@ import {
 import type {
   AgentDecision,
   BacktestResult,
+  BenchmarkId,
   CapitalGainsTaxEstimate,
+  CorporateAction,
   EquityPoint,
   Instrument,
   Market,
@@ -99,10 +101,12 @@ export function useHistory(accountId: string): UseQueryResult<EquityPoint[]> {
 export function usePerformance(
   accountId: string,
   range?: string,
+  benchmark?: BenchmarkId,
 ): UseQueryResult<api.PerformanceResult> {
   return useQuery({
-    queryKey: queryKeys.performance(accountId, range),
-    queryFn: ({ signal }) => api.getPerformance(accountId, range, signal),
+    queryKey: queryKeys.performance(accountId, range, benchmark),
+    queryFn: ({ signal }) =>
+      api.getPerformance(accountId, range, benchmark, signal),
     // 成績未確立（入金前/約定前）でもアプリを壊さない（穏当なプレースホルダ表示）。
     retry: false,
   });
@@ -144,6 +148,41 @@ export function useRunBacktest(): UseMutationResult<
 > {
   return useMutation<BacktestResult, Error, RunBacktestRequest>({
     mutationFn: (req) => api.runBacktest(req),
+  });
+}
+
+/**
+ * 指定銘柄の配当・分割イベント一覧（spec §2.3 / market-data）。
+ * 期間無指定時は API 既定範囲に委ねる。未提供でもアプリを壊さないよう retry:false。
+ */
+export function useCorporateActions(
+  instrumentId: string | undefined,
+  range?: { from?: string; to?: string },
+): UseQueryResult<CorporateAction[]> {
+  return useQuery({
+    queryKey: queryKeys.corporateActions(instrumentId ?? "", range),
+    queryFn: ({ signal }) =>
+      api.getCorporateActions(instrumentId as string, range, signal),
+    enabled: Boolean(instrumentId),
+    retry: false,
+  });
+}
+
+/**
+ * コーポレートアクションを口座へ反映するミューテーション
+ * （`POST /accounts/:id/corporate-actions`）。成功時にポジション/サマリ/取引履歴を無効化する。
+ */
+export function useApplyCorporateAction(
+  accountId: string,
+): UseMutationResult<{ ok: true }, Error, CorporateAction> {
+  const qc = useQueryClient();
+  return useMutation<{ ok: true }, Error, CorporateAction>({
+    mutationFn: (action) => api.applyCorporateAction(accountId, action),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.positions(accountId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.summary(accountId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.trades(accountId) });
+    },
   });
 }
 

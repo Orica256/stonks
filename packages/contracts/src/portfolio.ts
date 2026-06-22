@@ -8,6 +8,7 @@ import {
   Timestamp,
 } from "./common.js";
 import type { Instrument } from "./instrument.js";
+import type { CorporateAction } from "./market-data.js";
 import type { RealizedPnl } from "./ledger.js";
 import { MarginInfo, MarginType } from "./margin.js";
 import type { CapitalGainsTaxEstimate } from "./tax.js";
@@ -121,6 +122,23 @@ export interface PortfolioService {
     accountId: string,
     range: { from: Date; to: Date },
   ): Promise<CapitalGainsTaxEstimate[]>;
+
+  /**
+   * コーポレートアクションを口座へ適用する（spec §2.1 P1 分割調整 / §2.3 P1 配当受取）。
+   *
+   * - **DIVIDEND**: 当該銘柄の保有数量 × 1株あたり配当（`action.value`）を現金へ加算し、
+   *   `CashLedgerEntry(DIVIDEND)`（refId=CorporateAction）を起こす。建玉の通貨で受け取る。
+   * - **SPLIT**: 保有ポジションの数量・平均取得単価を分割比率（`action.value`）で調整する。
+   *   建玉価値（quantity × avgCost）は不変（n:1 で数量を倍に、avgCost を 1/n に）。
+   *
+   * **概算スコープ**: 源泉徴収・配当課税（所得税/住民税）・端株/端数の現金処理・外国税額控除は
+   * 行わない簡略方針（CLAUDE.md §7 免責）。配当は額面どおり現金加算する。税の精緻化は
+   * `estimateCapitalGainsTax` 同様、概算スコープ外とする。
+   *
+   * 後方互換のため optional（Phase 2/3 の既存実装/フェイクを壊さない）。portfolio の
+   * 実装タスクで必須化を domain-architect と検討する。
+   */
+  applyCorporateAction?(accountId: string, action: CorporateAction): Promise<void>;
 }
 
 /**
