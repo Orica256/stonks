@@ -6,8 +6,9 @@
  * `pnpm typecheck` / `*.contract.test.ts` では拾えない種類のズレを静的に検出する:
  *   A. HTTP クライアント（web/mcp-server/agent-runner）が叩くパス ↔ 実 API ルート
  *   B. spec §6.8 のエンドポイント一覧 ↔ apps/api の実装ルート
- *   C. spec §6 のモジュールインターフェース ↔ packages/contracts の export
+ *   C. spec §6 のモジュール IF ↔ packages/contracts（IF の存在 + メソッド単位の突合）
  *   D. 依存方向（spec §4.3「横方向の直接 import 禁止」）の遵守
+ *   E. spec §6 の各モジュール IF が契約遵守テスト（*.contract.test.ts）で覆われているか
  *
  * 仕様の一次情報は docs/spec.md（CLAUDE.md）。実装が spec から逸脱したら spec 側の
  * 更新提案を上げる前提で、ここでは「逸脱の検出」のみを担う。
@@ -183,34 +184,137 @@ function checkSpecEndpoints(spec, routes) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// C. spec §6 のモジュール IF ↔ contracts の export
+// C. spec §6 のモジュール IF ↔ contracts（IF の存在 + メソッド単位の突合）
 // ─────────────────────────────────────────────────────────────
 
-function checkContractInterfaces(spec) {
-  // §6 全体（## 6. 〜 ## 7. 直前）から `interface X` を収集。
+/**
+ * テキストから `interface Name { ... }` を抽出し、name → メソッド名集合を返す。
+ * 波括弧の対応で本体を切り出し、本体内の各行頭メソッド宣言 `name(` / `name?(`
+ * を拾う（プロパティ・コメント・ネストした型リテラルの行は `(` を伴わないため除外）。
+ * @param {string} text @returns {Map<string, Set<string>>}
+ */
+function extractInterfaces(text) {
+  /** @type {Map<string, Set<string>>} */
+  const map = new Map();
+  const re = /\binterface\s+([A-Z]\w+)\s*(?:extends[^{]*)?\{/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const name = m[1];
+    let depth = 0;
+    let body = "";
+    let i = re.lastIndex - 1; // 本体開き波括弧の位置
+    for (; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === "{") depth++;
+      else if (ch === "}") {
+        depth--;
+        if (depth === 0) break;
+      }
+      // 外側 IF の波括弧自体は含めず、本体だけを集める（単一行 IF も扱える）。
+      if (depth >= 1 && !(depth === 1 && ch === "{")) body += ch;
+    }
+    // コメント（例示の `// streamQuotes(...)`）とネストした型リテラル `{...}`
+    // （引数/戻り値のオブジェクト型）を除去してから、メソッド宣言 `name(` を拾う。
+    let cleaned = body
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/[^\n]*/g, "");
+    let prevLen;
+    do {
+      prevLen = cleaned.length;
+      cleaned = cleaned.replace(/\{[^{}]*\}/g, " ");
+    } while (cleaned.length !== prevLen);
+    const methods = new Set();
+    const mre = /(\w+)\??\s*\(/g;
+    let mm;
+    while ((mm = mre.exec(cleaned)) !== null) methods.add(mm[1]);
+    // 既出（同名 IF が複数ファイルに分散することは無い想定だが）はメソッドを合算。
+    const prev = map.get(name);
+    if (prev) for (const x of methods) prev.add(x);
+    else map.set(name, methods);
+  }
+  return map;
+}
+
+/** §6 全体（## 6. 〜 ## 7. 直前）の本文を返す。 */
+function specSixRegion(spec) {
   const start = spec.indexOf("## 6. ");
   const end = spec.indexOf("## 7. ");
-  const region = start >= 0 && end > start ? spec.slice(start, end) : "";
-  const ifNames = new Set();
-  let m;
-  const re = /\binterface\s+([A-Z]\w+)/g;
-  while ((m = re.exec(region)) !== null) ifNames.add(m[1]);
+  return start >= 0 && end > start ? spec.slice(start, end) : "";
+}
 
-  // contracts の export 名を収集。
+function checkContractInterfaces(spec) {
+  const specIfs = extractInterfaces(specSixRegion(spec));
+
+  // contracts の interface（メソッド付き）と全 export 名を収集。
+  const contractIfs = new Map();
   const exported = new Set();
   for (const file of walk(join(ROOT, "packages/contracts/src"))) {
     if (/\.test\.tsx?$/.test(file)) continue;
     const src = readFileSync(file, "utf8");
+    for (const [n, methods] of extractInterfaces(src)) {
+      const prev = contractIfs.get(n);
+      if (prev) for (const x of methods) prev.add(x);
+      else contractIfs.set(n, methods);
+    }
     let e;
     const er = /export\s+(?:interface|type|const)\s+([A-Za-z_]\w*)/g;
     while ((e = er.exec(src)) !== null) exported.add(e[1]);
   }
 
-  for (const name of ifNames) {
+  for (const [name, specMethods] of specIfs) {
+    // C-1: IF 名の存在（contracts に export されているか）。
     if (!exported.has(name)) {
       err(
         "C:spec↔contracts",
         `spec §6 のモジュール IF \`${name}\` が packages/contracts に export されていない`,
+      );
+      continue;
+    }
+    // C-2: メソッド単位の突合。spec のメソッドが契約 IF に無ければ食い違い（ERROR）。
+    const cMethods = contractIfs.get(name);
+    if (!cMethods) continue; // export はあるが interface 本体未検出（型エイリアス等）。
+    for (const meth of specMethods) {
+      if (!cMethods.has(meth)) {
+        err(
+          "C:spec↔contracts",
+          `spec §6 の \`${name}.${meth}()\` が packages/contracts の同 IF に無い（IF 食い違い）`,
+        );
+      }
+    }
+    // 契約側だけにあるメソッドは追加的・後方互換の可能性 → WARN（spec 追記の検討材料）。
+    for (const meth of cMethods) {
+      if (!specMethods.has(meth)) {
+        warn(
+          "C:spec↔contracts",
+          `contracts の \`${name}.${meth}()\` が spec §6 に未記載（追加的・後方互換か要 spec 追記）`,
+        );
+      }
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// E. spec §6 の各モジュール IF が契約遵守テストで覆われているか
+// ─────────────────────────────────────────────────────────────
+
+function checkContractTestCoverage(spec) {
+  const specIfs = extractInterfaces(specSixRegion(spec));
+  // リポジトリ全体の *.contract.test.ts を連結（IF 名の言及を覆う/覆わないで判定）。
+  let allContractTests = "";
+  for (const base of ["packages", "apps"]) {
+    for (const file of walk(join(ROOT, base))) {
+      if (/\.contract\.test\.tsx?$/.test(file)) {
+        allContractTests += readFileSync(file, "utf8") + "\n";
+      }
+    }
+  }
+  for (const name of specIfs.keys()) {
+    // 単語境界で IF 名が契約テストに現れるか。
+    const re = new RegExp(`\\b${name}\\b`);
+    if (!re.test(allContractTests)) {
+      warn(
+        "E:contract-test",
+        `spec §6 のモジュール IF \`${name}\` を参照する *.contract.test.ts が見当たらない（契約遵守テスト未整備の可能性）`,
       );
     }
   }
@@ -294,6 +398,7 @@ const routes = collectApiRoutes();
 checkClientServerParity(routes);
 checkSpecEndpoints(spec, routes);
 checkContractInterfaces(spec);
+checkContractTestCoverage(spec);
 checkDependencyDirection();
 
 // レポート出力
