@@ -44,6 +44,18 @@ export class InMemoryOrderRepository implements OrderRepository {
     this.orders.set(order.id, { ...order });
   }
 
+  async findByLinkGroupId(linkGroupId: string): Promise<Order[]> {
+    return [...this.orders.values()]
+      .filter((o) => o.linkGroupId === linkGroupId)
+      .map((o) => ({ ...o }));
+  }
+
+  async findByParentOrderId(parentOrderId: string): Promise<Order[]> {
+    return [...this.orders.values()]
+      .filter((o) => o.parentOrderId === parentOrderId)
+      .map((o) => ({ ...o }));
+  }
+
   /** テスト補助: 全注文のスナップショット。 */
   all(): Order[] {
     return [...this.orders.values()].map((o) => ({ ...o }));

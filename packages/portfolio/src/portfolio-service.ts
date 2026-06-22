@@ -361,9 +361,14 @@ export class DefaultPortfolioService implements PortfolioService {
     fee: Decimal,
     at: Date,
   ): Promise<void> {
+    // Phase 5: 建玉は (account, instrument, side=LONG, marginType ?? "CASH") で一意。
+    // CASH 現物と MARGIN 信用の同方向買いは別建玉として独立に積み上げる。
+    const marginType = trade.marginType ?? "CASH";
     const existing = await this.repo.getPosition(
       trade.accountId,
       trade.instrumentId,
+      "LONG",
+      marginType,
     );
     const prevQty = existing ? new Decimal(existing.quantity) : ZERO;
     const prevCost = existing ? new Decimal(existing.avgCost) : ZERO;
@@ -453,9 +458,14 @@ export class DefaultPortfolioService implements PortfolioService {
     fee: Decimal,
     at: Date,
   ): Promise<void> {
+    // Phase 5: 売りは買いと同じ建玉キー（marginType ?? "CASH"）に当てる。
+    // CASH 建玉の売りは CASH を、MARGIN 建玉の売りは MARGIN を取り崩す。
+    const marginType = trade.marginType ?? "CASH";
     const existing = await this.repo.getPosition(
       trade.accountId,
       trade.instrumentId,
+      "LONG",
+      marginType,
     );
     const prevQty = existing ? new Decimal(existing.quantity) : ZERO;
     if (qty.gt(prevQty)) {
@@ -481,7 +491,12 @@ export class DefaultPortfolioService implements PortfolioService {
 
     const remaining = prevQty.minus(qty);
     if (remaining.lte(ZERO)) {
-      await this.repo.removePosition(trade.accountId, trade.instrumentId);
+      await this.repo.removePosition(
+        trade.accountId,
+        trade.instrumentId,
+        "LONG",
+        marginType,
+      );
     } else if (existing) {
       // 平均建値は売却で変化しない（一部売却。method 非依存で残ロットと整合する）。
       await this.repo.savePosition({ ...existing, quantity: remaining.toNumber() });

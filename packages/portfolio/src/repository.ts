@@ -3,7 +3,9 @@ import type {
   CashLedgerEntry,
   Currency,
   EquityPoint,
+  MarginType,
   Position,
+  PositionSide,
   RealizedPnl,
   RealizedPnlWithLots,
   TaxLot,
@@ -16,12 +18,38 @@ import type {
  * db を直接 import しないことで横依存を避ける（CLAUDE.md §0/§4.3）。
  */
 export interface PortfolioRepository {
-  /** 口座×銘柄のオープンポジション（数量 0 は保持しない）。 */
-  getPosition(accountId: string, instrumentId: string): Promise<Position | undefined>;
+  /**
+   * 口座×銘柄のオープンポジション（数量 0 は保持しない）。
+   *
+   * Phase 5: 建玉一意キーは `[accountId, instrumentId, side, marginType]`
+   * （`POSITION_UNIQUE_KEY`）。CASH 現物 / MARGIN 信用の同方向建玉を分離するため、
+   * `side`/`marginType` を渡すと厳密に 1 建玉を引く。**後方互換**: `marginType` 省略時は
+   * `(side, CASH)` を優先し、無ければ当該 (account, instrument, side) の単一建玉へ
+   * フォールバックする（CASH/MARGIN いずれか一方しか無い既存フローは従来挙動）。
+   */
+  getPosition(
+    accountId: string,
+    instrumentId: string,
+    side?: PositionSide,
+    marginType?: MarginType,
+  ): Promise<Position | undefined>;
   listPositions(accountId: string): Promise<Position[]>;
-  /** 数量 0 は削除、それ以外は upsert。 */
+  /**
+   * 数量 0 は削除、それ以外は upsert。
+   * 一意キーは `Position` 自身の `(accountId, instrumentId, side, marginType ?? "CASH")`
+   * （Phase 5: CASH/MARGIN を別行で保持）。
+   */
   savePosition(position: Position): Promise<void>;
-  removePosition(accountId: string, instrumentId: string): Promise<void>;
+  /**
+   * 建玉を削除する。`side`/`marginType` を渡すと厳密キーで削除。省略時は
+   * `getPosition` と同じフォールバック（CASH 優先→単一建玉）で 1 建玉を消す。
+   */
+  removePosition(
+    accountId: string,
+    instrumentId: string,
+    side?: PositionSide,
+    marginType?: MarginType,
+  ): Promise<void>;
 
   /** 通貨別現金残高。未登録通貨は呼び出し側が 0 とみなす。 */
   getCashBalance(accountId: string, currency: Currency): Promise<CashBalance | undefined>;

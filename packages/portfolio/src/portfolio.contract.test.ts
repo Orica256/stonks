@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CapitalGainsTaxEstimate,
   EquityPoint,
+  POSITION_UNIQUE_KEY,
   PortfolioSummary,
   PositionView,
   RealizedPnl,
@@ -102,6 +103,54 @@ describe("PortfolioService 契約遵守", () => {
     });
     expect(tax).toHaveLength(1);
     expect(CapitalGainsTaxEstimate.parse(tax[0])).toBeTruthy();
+  });
+
+  it("建玉一意キー（POSITION_UNIQUE_KEY）に marginType を含み CASH/MARGIN を分離する（Phase 5）", async () => {
+    // 契約の一意キー要素を実装が遵守していることを表明する。
+    expect(POSITION_UNIQUE_KEY).toEqual([
+      "accountId",
+      "instrumentId",
+      "side",
+      "marginType",
+    ]);
+
+    const svc = build();
+    await svc.deposit("p5", { amount: "10000000", currency: "JPY" });
+    // 同一銘柄・同方向で CASH と MARGIN を建てる。
+    await svc.applyTrade({
+      id: "c1",
+      orderId: "co1",
+      accountId: "p5",
+      instrumentId: "i-1",
+      side: "BUY",
+      quantity: 100,
+      price: "1000",
+      fee: "0",
+      currency: "JPY",
+      executedAt: "2026-06-19T00:00:00.000Z",
+    });
+    await svc.applyTrade({
+      id: "m1",
+      orderId: "mo1",
+      accountId: "p5",
+      instrumentId: "i-1",
+      side: "BUY",
+      quantity: 50,
+      price: "1000",
+      fee: "0",
+      currency: "JPY",
+      marginType: "MARGIN",
+      executedAt: "2026-06-19T00:00:00.000Z",
+    });
+
+    // 公開 IF（getPositions）からも CASH/MARGIN が別 PositionView として観測できる。
+    const views = await svc.getPositions("p5");
+    expect(views).toHaveLength(2);
+    for (const v of views) expect(PositionView.parse(v)).toBeTruthy();
+    const byKey = new Set(
+      views.map((v) => `${v.side}::${v.marginType ?? "CASH"}`),
+    );
+    expect(byKey).toEqual(new Set(["LONG::CASH", "LONG::MARGIN"]));
   });
 
   it("withdraw は残高不足を拒否する（B4）", async () => {

@@ -142,6 +142,16 @@
   「`cancelOrderGroup?(linkGroupId): Promise<Order[]>` // グループ取消（P2。optional）」。
 - spec §5.1 Position 行に一意キーの含意を補記提案: 「Position は `(accountId, instrumentId, side, marginType)` で一意（CASH/MARGIN 同方向建玉を分離。Phase 5）」。
 - spec §5.2 不変条件に追記提案: 「OCO グループは同時に高々 1 件のみ FILLED（他は CANCELLED）」「IFD 子は親が FILLED になるまで約定しない（WAITING）」。
+- spec §6.8 に Phase 5 新ルートの追記提案: `POST /accounts/:id/orders/bracket`（複合発注）、`DELETE /orders/groups/:linkGroupId`（グループ取消）。現状は整合性チェックで §6.8 未記載 WARN（許容）。
+
+### Phase 5 実装完了サマリ（2026-06-23, ブランチ `integration/phase5`）
+contracts→trading-engine→portfolio→api を依存方向に沿って実装し全ゲート green（test 384→418、整合性 ERROR 0/WARN 10）。各層の成果と**新規に判明した申し送り**:
+- **trading-engine**（46 テスト, +11）: `placeBracketOrder`/`cancelOrderGroup` 実装。`evaluateOpenOrders` に WAITING 除外＋約定時カスケード（OCO 片約定→他方取消／IFD 親約定→子発効）。内部ポート `OrderRepository` に `findByLinkGroupId`/`findByParentOrderId` を追加（contracts 変更不要。実 DB アダプタは apps/api 側で索引利用実装）。親 EXPIRED/CANCELLED 時は未発効 WAITING 子を連動 CANCELLED（孤児防止）。
+- **portfolio**（38 テスト, +5）: 建玉キーを `(accountId, instrumentId, side, marginType ?? "CASH")` に拡張し CASH/MARGIN 同方向建玉を別行集計。現物のみフローは保存時 `?? "CASH"` で従来と同一キーに集約＝後方互換。
+  - **要 domain-architect（新規申し送り）**: `TaxLot` に `marginType` が無く、税ロットは `(accountId, instrumentId)` 単位。既定 AVERAGE では Position の avgCost から実現損益を出すため建玉分離は正しく反映され問題なし。**FIFO/LIFO では同一銘柄の CASH/MARGIN ロットが混在し取り崩し順・原価が混ざり得る**（数量/評価は正・税ロット内訳の厳密な建玉別分離は不可）。完全分離には `TaxLot.marginType` 追加＋`listTaxLots` の絞り込み＋`consumeTaxLots`/`appendTaxLot` 連動が必要（契約追加候補）。
+- **apps/api**（25 テスト, +5）: `PrismaOrderRepository.findByLinkGroupId`/`findByParentOrderId` 実装、Order マッパに link 列、Position upsert キーを `accountId_instrumentId_side` → `accountId_instrumentId_side_marginType`（現物は where に `"CASH"` 明示）。新ルート `POST /accounts/:id/orders/bracket`・`DELETE /orders/groups/:linkGroupId`。
+  - **申し送り（情報共有）**: (1) Phase 5 で Prisma schema が変わったため、pull 後の typecheck/test 前に `corepack pnpm@9.12.0 -r generate`（または `--filter @stonks/db generate`）が必須（`pnpm verify` は先頭で generate するので verify 経由なら自動）。(2) apps/api は `MarginPolicyProvider` 未配線のため MARGIN 発注は engine 側で一律拒否される。MARGIN の HTTP 発注を露出するには MarginPolicyProvider の結線が別途必要（今回の CASH/MARGIN 分離は portfolio の applyTrade 経由で担保済み・契約上の問題なし）。
+- **未実施（次 Wave 候補・任意）**: web の bracket 発注 UI と OCO/IFD 状態可視化（`Order.activation`/`linkGroupId`/`parentOrderId`）。contracts 変更不要で frontend-dev 単独で進められる。
 
 ## Phase 3 契約: 譲渡益課税の概算（capital gains tax estimate）✅ 反映済み
 

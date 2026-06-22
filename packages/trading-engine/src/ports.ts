@@ -18,6 +18,16 @@ export interface OrderRepository {
   findOpen(): Promise<Order[]>;
   /** 既存注文を更新する（状態遷移・約定数量の反映）。 */
   update(order: Order): Promise<void>;
+  /**
+   * 複合注文の `linkGroupId` に属する全注文を返す（Phase 5。OCO/bracket カスケード用）。
+   * 状態（オープン/WAITING/約定済み）に依らず全件返す（呼び出し側が状態で絞る）。
+   */
+  findByLinkGroupId(linkGroupId: string): Promise<Order[]>;
+  /**
+   * 指定注文を親（`parentOrderId`）に持つ子注文を返す（Phase 5。IFD カスケード用）。
+   * 状態に依らず全件返す。
+   */
+  findByParentOrderId(parentOrderId: string): Promise<Order[]>;
 }
 
 // 現金/保有の読み取りと銘柄解決は contracts の正式 IF を使う（B2）。

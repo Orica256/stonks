@@ -65,6 +65,13 @@ export const toOrder = (row: Prisma.OrderGetPayload<object>): Order => ({
   ...(row.limitPrice != null ? { limitPrice: row.limitPrice.toString() } : {}),
   ...(row.stopPrice != null ? { stopPrice: row.stopPrice.toString() } : {}),
   timeInForce: row.timeInForce,
+  // Phase 3: 資金区分（DB は @default(CASH) で必ず値を持つ）。
+  marginType: row.marginType,
+  // Phase 5: 複合注文の link フィールド（単発は NULL → optional 未設定で従来挙動）。
+  ...(row.linkGroupId != null ? { linkGroupId: row.linkGroupId } : {}),
+  ...(row.linkType != null ? { linkType: row.linkType } : {}),
+  ...(row.parentOrderId != null ? { parentOrderId: row.parentOrderId } : {}),
+  activation: row.activation,
   status: row.status,
   createdAt: row.createdAt.toISOString(),
   updatedAt: row.updatedAt.toISOString(),
@@ -80,6 +87,8 @@ export const toPosition = (
   quantity: row.quantity,
   avgCost: row.avgCost.toString(),
   currency: row.currency, // B3: 建玉通貨
+  // Phase 5: 資金区分（一意キー要素。DB は @default(CASH)）。CASH/MARGIN の同方向建玉を分離。
+  marginType: row.marginType,
   openedAt: row.openedAt.toISOString(),
 });
 
