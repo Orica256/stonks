@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Timestamp } from "./common.js";
 import type { PriceBar } from "./market-data.js";
 
 export const IndicatorKind = z.enum([
@@ -26,8 +27,8 @@ export const IndicatorSeries = z.object({
 export type IndicatorSeries = z.infer<typeof IndicatorSeries>;
 
 export const IndicatorResult = z.object({
-  /** 入力バーの ts 列（values と同じ長さ）。 */
-  ts: z.array(z.string()),
+  /** 入力バーの ts 列（values と同じ長さ。UTC ISO8601）。 */
+  ts: z.array(Timestamp),
   series: z.array(IndicatorSeries),
 });
 export type IndicatorResult = z.infer<typeof IndicatorResult>;
