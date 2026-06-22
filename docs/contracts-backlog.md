@@ -68,15 +68,90 @@
     必須メソッドへ昇格するか domain-architect と調整。
   - MARGIN 建玉は `Position.marginType="MARGIN"` + `Position.margin`(MarginInfo) を設定。
 - **未決事項 / 要調整**:
-  - `Position` の一意キーは後方互換で `[accountId, instrumentId, side]` のまま据え置いた
-    （apps/api の upsert キー `accountId_instrumentId_side` を壊さないため）。同一 (account, instrument, side)
-    で **CASH と MARGIN の LONG 建玉を別行**にしたくなった場合は、`[..., marginType]` への一意キー変更を
-    **apps/api 担当と調整**して行う（repository の where 句修正が必要）。当面は side（LONG/SHORT）で大半が分離される。
+  - ~~`Position` の一意キーは後方互換で `[accountId, instrumentId, side]` のまま据え置いた~~
+    **→ Phase 5 で `[accountId, instrumentId, side, marginType]` へ拡張し解決済み**（上「Phase 5 契約」節参照）。
+    apps/api の upsert キーは `accountId_instrumentId_side` → `accountId_instrumentId_side_marginType` へ要修正（次 Wave）。
   - 税の `method` の既定を AVERAGE としたが、JP 現物の標準は「総平均/移動平均」。FIFO/LIFO/SPECIFIC_LOT の
     選択 UI/設定をどこで持つか（口座属性か発注時指定か）は portfolio/api 実装時に詰める。
   - 譲渡益課税の概算（spec §2.3 P1 の税計算）と税ロットの接続（`RealizedPnlWithLots` → `CashLedgerEntry(TAX)`）は
     portfolio 実装の範囲で詰める。spec とは矛盾なし（spec §5.1 の TaxLot 定義に `remainingQuantity` を
     実務上追加したのみ。spec 側の TaxLot 行に残数量の含意を補記する余地あり＝**spec 更新提案候補**）。
+
+## Phase 5 契約: 複合注文(OCO/IFD)・建玉分離（Position 一意キー）✅ 反映済み
+
+> spec §2.2 P2「OCO/IFD などの複合注文」と、本バックログ末尾の未決事項
+> 「CASH/MARGIN 同一建玉分離（Position 一意キー変更）」を `domain-architect` が確定。
+> **すべて追加的・後方互換**（新 optional フィールド/新 enum/新 optional メソッドのみ。
+> Phase 2/3/4 の全テストを壊さない。既存 contracts 30→43 テスト green）。
+
+### 1) 複合注文（OCO / IFD / bracket）
+
+**採用設計**: 「`Order` への optional link フィールド追加」＋「複合発注は別コマンド `PlaceBracketOrderCommand` を新設」のハイブリッド。
+
+- `order-link.ts`（新規）:
+  - `OrderLinkType`(OCO|IFD)、`OrderActivation`(ACTIVE|WAITING)。
+  - `OrderGroup`（グループ単位の取消/照会/監査用の読み取り表現。`orderIds.min(2)`・`parentOrderId?`）。永続化は任意（現状 DB テーブル化せず Order の列だけでカスケード成立）。
+  - `PlaceBracketOrderCommand`（`kind` で discriminated union）:
+    - `OCO`: `legs`(2 本) を同時 ACTIVE。片約定で他方 CANCELLED。
+    - `IFD`: `parent` 約定で `children`(1 本以上) を WAITING→ACTIVE 発効。
+    - `BRACKET`: `parent` 約定で `children`(2 本) 発効し、子同士を OCO で結ぶ（利確＋損切）。
+    - leg/parent/child の中身は **`z.unknown()`**（`PlaceOrderCommand` を直接 import すると循環し、また各脚の price 妥当性は trading-engine が `PlaceOrderCommand.safeParse` で個別検証するのが筋のため）。contracts は構造と件数（tuple/min）と意味論のみ固定。
+- `order.ts` `Order` に optional 追加（**後方互換**。単発は全て未設定で従来挙動）:
+  - `linkGroupId?`（OCO/bracket 子のグループ ID）、`linkType?`(OCO|IFD)、`parentOrderId?`（IFD/bracket 親）、`activation?`(ACTIVE|WAITING)。
+  - **設計判断**: `OrderStatus` enum に WAITING を足さず、発効状態を直交軸 `activation` として別フィールドに分離した。理由: 既存の `OPEN_STATUSES=Set("PENDING","PARTIALLY_FILLED")`（trading-engine）や永続層の status 既定を揺らさずに「PENDING のまま休眠（WAITING）」を表せるため。IFD 子は `status=PENDING` かつ `activation=WAITING` で受付し、親約定でエンジンが `activation=ACTIVE` へ遷移。
+- `trading-engine.ts` `TradingEngine` に **optional メソッド**追加（既存の単発のみ実装/フェイクを壊さない）:
+  - `placeBracketOrder?(cmd: PlaceBracketOrderCommand): Promise<Order[]>`。
+  - `cancelOrderGroup?(linkGroupId: string): Promise<Order[]>`（グループ一括取消）。
+  - 既存 `placeOrder`/`cancelOrder`/`evaluateOpenOrders` は据え置き。カスケード（OCO 片約定→他方取消、IFD 親約定→子発効）は `evaluateOpenOrders` の約定処理内で実装する想定。
+
+**却下案**:
+- 「`PlaceOrderCommand` に link フィールドを足して単発と複合を 1 コマンドに統合」→ 既存 `superRefine`（type 別 price 検証）に OCO/IFD 用の cross-leg 検証が混入し肥大化・後方互換リスク。別コマンドに分離して却下回避。
+- 「`OrderStatus` に WAITING/INACTIVE を追加」→ 既存の status 判定・永続層既定・exhaustive 比較を揺らす破壊リスク。直交軸 `activation` で代替し却下。
+- 「専用 `OrderLink` 結合テーブルを必須化」→ Order の optional 列だけでカスケードは成立するため過剰。読み取り用 `OrderGroup` 型のみ提供し永続化は後続判断に委ねた。
+
+### 2) 建玉一意キー: `[accountId, instrumentId, side]` → `[..., marginType]`
+
+- `portfolio.ts`: `POSITION_UNIQUE_KEY = ["accountId","instrumentId","side","marginType"]` を新設し JSDoc で含意を明記。`Position.marginType` は型上は optional（既存 record 手組みの後方互換）だが **一意キー要素としては実質必須＝未指定は CASH**（`marginType ?? "CASH"` で一意性判定）。永続層 `@default(CASH)`。
+- `db` schema: Position の `@@unique` を `[accountId, instrumentId, side, marginType]` へ変更。既存行は marginType=CASH（Phase 3 で DEFAULT 付与済み）のため新キーでも一意性が保たれ後方互換。
+- 手書きマイグレーション `prisma/migrations/20260623_phase5_compound_orders_position_key/migration.sql`:
+  - 旧制約 `Position_accountId_instrumentId_side_key` を DROP（`IF EXISTS`）→ 新 4 列 UNIQUE を ADD。
+  - Order に `linkGroupId/linkType/parentOrderId/activation` 列追加（NULL 許容・`activation @default(ACTIVE)`）＋ enum `OrderLinkType`/`OrderActivation` 作成＋索引（linkGroupId/parentOrderId）。
+  - すべて DEFAULT 付き ADD COLUMN / NULL 許容で後方互換。`prisma validate` green。
+
+### 後続実装担当への申し送り
+- **apps/api（次 Wave。重要・必須対応）**:
+  - Position の upsert キー名が **`accountId_instrumentId_side` → `accountId_instrumentId_side_marginType`** に変わる。`prisma-position.repository`（または相当）の `where: { accountId_instrumentId_side: {...} }` を `where: { accountId_instrumentId_side_marginType: { accountId, instrumentId, side, marginType: marginType ?? "CASH" } }` に修正する。`marginType` 未指定の現物は明示的に `"CASH"` を渡すこと（DB 既定に頼らず where では値が必須）。
+  - 既存の現物建玉は marginType=CASH で 1 行のままなので、既存データの移行は不要（後方互換）。
+  - 複合注文 API: `placeBracketOrder` / `cancelOrderGroup` を HTTP に出すなら spec §6.8 にエンドポイント追記（例 `POST /accounts/:id/orders/bracket`、`DELETE /orders/groups/:linkGroupId`）。出さない場合は agent/web からは単発のみ。
+- **trading-engine（複合注文実装）**:
+  - `placeBracketOrder(cmd)`: 各 leg/parent/child を `PlaceOrderCommand.safeParse` で個別検証（price 妥当性はここで担保）。OCO は 2 脚に共通 `linkGroupId`＋`linkType=OCO`・両 `activation=ACTIVE`。IFD は親 ACTIVE・子に `parentOrderId`＋`linkType=IFD`＋`activation=WAITING`。BRACKET は親 ACTIVE・子 2 本に共通 `linkGroupId`(OCO)＋共通 `parentOrderId`(IFD 親)＋`activation=WAITING`。
+  - `evaluateOpenOrders`: `activation=WAITING` の注文は約定評価から除外（休眠）。約定確定時に (a) 同 `linkGroupId` の他注文を CANCELLED（OCO カスケード）、(b) `parentOrderId === filledOrderId` の子を `activation=ACTIVE` へ発効（IFD カスケード）。bracket は (a)+(b) が連鎖する。
+  - `cancelOrderGroup(linkGroupId)`: 同グループのオープン/WAITING 注文を一括 CANCELLED。
+  - リポジトリ IF（`OrderRepository`）に `findByLinkGroupId`/`findByParentOrderId` 相当が要るなら contracts へ追加提案（現状 Order に索引対応列はあるので実装側の port 追加で足りる見込み。必要なら domain-architect へ）。
+- **portfolio**: 建玉分離の影響は upsert キー（api 担当）が主。`applyTrade` で建玉を引く際の一意性は `(accountId, instrumentId, side, marginType ?? "CASH")` で評価すること。CASH/MARGIN を別建玉として積み上げる（既に marginType で Trade を振り分ける Phase 3 方針と整合）。
+- **web**: bracket 発注 UI（利確/損切セット）と OCO/IFD 状態表示を出すなら `Order.activation`(WAITING=待機) と `linkGroupId`/`parentOrderId` で関係を可視化。投資助言表現は入れない（spec §9）。
+
+### 未決事項 / 要調整
+- `PlaceBracketOrderCommand` の leg を `z.unknown()` にしたため、contracts 単体では各脚の price 妥当性を検証しない（trading-engine が `PlaceOrderCommand` で検証）。将来 `PlaceOrderCommand` を別ファイルへ切り出して循環を解けば、leg を厳密型にできる（**型締め候補**。現契約でも実装可）。
+- `OrderGroup` の永続化（専用テーブル）は現状見送り。グループ単位の監査要件が強くなれば DB 化を検討（過剰設計回避）。
+- IFD 子の有効期限: 親約定前に親が EXPIRED/CANCELLED された場合の子の扱い（連動 CANCELLED が妥当）はカスケード規則として trading-engine 実装で確定し、必要なら不変条件を spec §5.2 に追記提案。
+
+### spec 更新提案
+- spec §6.2 `TradingEngine` IF に複合注文メソッドを同期追記してよい（IF は contracts が真実だが spec も一次情報のため）。破壊的でない追記:
+  「`placeBracketOrder?(cmd: PlaceBracketOrderCommand): Promise<Order[]>` // OCO/IFD/bracket（P2。optional）」
+  「`cancelOrderGroup?(linkGroupId): Promise<Order[]>` // グループ取消（P2。optional）」。
+- spec §5.1 Position 行に一意キーの含意を補記提案: 「Position は `(accountId, instrumentId, side, marginType)` で一意（CASH/MARGIN 同方向建玉を分離。Phase 5）」。
+- spec §5.2 不変条件に追記提案: 「OCO グループは同時に高々 1 件のみ FILLED（他は CANCELLED）」「IFD 子は親が FILLED になるまで約定しない（WAITING）」。
+- spec §6.8 に Phase 5 新ルートの追記提案: `POST /accounts/:id/orders/bracket`（複合発注）、`DELETE /orders/groups/:linkGroupId`（グループ取消）。現状は整合性チェックで §6.8 未記載 WARN（許容）。
+
+### Phase 5 実装完了サマリ（2026-06-23, ブランチ `integration/phase5`）
+contracts→trading-engine→portfolio→api を依存方向に沿って実装し全ゲート green（test 384→418、整合性 ERROR 0/WARN 10）。各層の成果と**新規に判明した申し送り**:
+- **trading-engine**（46 テスト, +11）: `placeBracketOrder`/`cancelOrderGroup` 実装。`evaluateOpenOrders` に WAITING 除外＋約定時カスケード（OCO 片約定→他方取消／IFD 親約定→子発効）。内部ポート `OrderRepository` に `findByLinkGroupId`/`findByParentOrderId` を追加（contracts 変更不要。実 DB アダプタは apps/api 側で索引利用実装）。親 EXPIRED/CANCELLED 時は未発効 WAITING 子を連動 CANCELLED（孤児防止）。
+- **portfolio**（38 テスト, +5）: 建玉キーを `(accountId, instrumentId, side, marginType ?? "CASH")` に拡張し CASH/MARGIN 同方向建玉を別行集計。現物のみフローは保存時 `?? "CASH"` で従来と同一キーに集約＝後方互換。
+  - **要 domain-architect（新規申し送り）**: `TaxLot` に `marginType` が無く、税ロットは `(accountId, instrumentId)` 単位。既定 AVERAGE では Position の avgCost から実現損益を出すため建玉分離は正しく反映され問題なし。**FIFO/LIFO では同一銘柄の CASH/MARGIN ロットが混在し取り崩し順・原価が混ざり得る**（数量/評価は正・税ロット内訳の厳密な建玉別分離は不可）。完全分離には `TaxLot.marginType` 追加＋`listTaxLots` の絞り込み＋`consumeTaxLots`/`appendTaxLot` 連動が必要（契約追加候補）。
+- **apps/api**（25 テスト, +5）: `PrismaOrderRepository.findByLinkGroupId`/`findByParentOrderId` 実装、Order マッパに link 列、Position upsert キーを `accountId_instrumentId_side` → `accountId_instrumentId_side_marginType`（現物は where に `"CASH"` 明示）。新ルート `POST /accounts/:id/orders/bracket`・`DELETE /orders/groups/:linkGroupId`。
+  - **申し送り（情報共有）**: (1) Phase 5 で Prisma schema が変わったため、pull 後の typecheck/test 前に `corepack pnpm@9.12.0 -r generate`（または `--filter @stonks/db generate`）が必須（`pnpm verify` は先頭で generate するので verify 経由なら自動）。(2) apps/api は `MarginPolicyProvider` 未配線のため MARGIN 発注は engine 側で一律拒否される。MARGIN の HTTP 発注を露出するには MarginPolicyProvider の結線が別途必要（今回の CASH/MARGIN 分離は portfolio の applyTrade 経由で担保済み・契約上の問題なし）。
+- **未実施（次 Wave 候補・任意）**: web の bracket 発注 UI と OCO/IFD 状態可視化（`Order.activation`/`linkGroupId`/`parentOrderId`）。contracts 変更不要で frontend-dev 単独で進められる。
 
 ## Phase 3 契約: 譲渡益課税の概算（capital gains tax estimate）✅ 反映済み
 

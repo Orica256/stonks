@@ -3,7 +3,9 @@ import type {
   CashLedgerEntry,
   Currency,
   EquityPoint,
+  MarginType,
   Position,
+  PositionSide,
   RealizedPnl,
   TaxLot,
   Trade,
@@ -21,7 +23,8 @@ import {
 /**
  * portfolio の PortfolioRepository ポートを Prisma で実装する（本番リポジトリ）。
  *
- * - Position は (accountId, instrumentId, side=LONG) で一意。現物のみ扱う（信用は Phase 3）。
+ * - Position は (accountId, instrumentId, side, marginType) で一意（Phase 5。CASH/MARGIN 分離）。
+ *   marginType 未指定の現物は明示的に "CASH" を渡す（DB 既定に頼らない）。
  * - EquityPoint は専用テーブルが無いため PerformanceSnapshot.equity に最小情報で保存する
  *   （cash/positionsValue 等は 0 詰め。完全な成績指標は agent-trader/Phase 3 で拡充）。
  * テストは portfolio の InMemoryPortfolioRepository を使い、ここは typecheck で型整合を担保する。
@@ -32,12 +35,15 @@ export class PrismaPortfolioRepository implements PortfolioRepository {
   async getPosition(
     accountId: string,
     instrumentId: string,
+    side?: PositionSide,
+    marginType?: MarginType,
   ): Promise<Position | undefined> {
-    const row = await this.db.position.findUnique({
-      where: {
-        accountId_instrumentId_side: { accountId, instrumentId, side: "LONG" },
-      },
-    });
+    const row = await this.resolvePositionRow(
+      accountId,
+      instrumentId,
+      side,
+      marginType,
+    );
     return row ? toPosition(row) : undefined;
   }
 
@@ -47,19 +53,25 @@ export class PrismaPortfolioRepository implements PortfolioRepository {
   }
 
   async savePosition(position: Position): Promise<void> {
+    // Phase 5: 一意キーは [accountId, instrumentId, side, marginType]。
+    // marginType 未指定の現物は明示的に "CASH"（DB 既定に頼らず where では値が必須）。
+    const side = position.side ?? "LONG";
+    const marginType = position.marginType ?? "CASH";
     await this.db.position.upsert({
       where: {
-        accountId_instrumentId_side: {
+        accountId_instrumentId_side_marginType: {
           accountId: position.accountId,
           instrumentId: position.instrumentId,
-          side: "LONG",
+          side,
+          marginType,
         },
       },
       create: {
         id: position.id,
         accountId: position.accountId,
         instrumentId: position.instrumentId,
-        side: "LONG",
+        side,
+        marginType,
         quantity: position.quantity,
         avgCost: position.avgCost,
         currency: position.currency,
@@ -73,10 +85,54 @@ export class PrismaPortfolioRepository implements PortfolioRepository {
     });
   }
 
-  async removePosition(accountId: string, instrumentId: string): Promise<void> {
-    await this.db.position.deleteMany({
-      where: { accountId, instrumentId, side: "LONG" },
+  async removePosition(
+    accountId: string,
+    instrumentId: string,
+    side?: PositionSide,
+    marginType?: MarginType,
+  ): Promise<void> {
+    const row = await this.resolvePositionRow(
+      accountId,
+      instrumentId,
+      side,
+      marginType,
+    );
+    if (!row) return;
+    await this.db.position.delete({ where: { id: row.id } });
+  }
+
+  /**
+   * 建玉行を解決する（Phase 5 のフォールバック付き。getPosition/removePosition 共通）。
+   *
+   * `side`/`marginType` を渡せば厳密キー `[accountId, instrumentId, side, marginType]` で 1 件。
+   * 省略時は後方互換: `side=LONG`・`marginType=CASH` を優先し、無ければ当該
+   * (account, instrument, side=LONG) の単一建玉へフォールバックする（PortfolioRepository IF）。
+   */
+  private async resolvePositionRow(
+    accountId: string,
+    instrumentId: string,
+    side?: PositionSide,
+    marginType?: MarginType,
+  ) {
+    const resolvedSide = side ?? "LONG";
+    // marginType が明示された、または現物 CASH を優先で厳密に引く。
+    const preferredMargin = marginType ?? "CASH";
+    const exact = await this.db.position.findUnique({
+      where: {
+        accountId_instrumentId_side_marginType: {
+          accountId,
+          instrumentId,
+          side: resolvedSide,
+          marginType: preferredMargin,
+        },
+      },
     });
+    if (exact || marginType !== undefined) return exact;
+    // marginType 未指定で CASH が無ければ、同 (account, instrument, side) の単一建玉へフォールバック。
+    const rows = await this.db.position.findMany({
+      where: { accountId, instrumentId, side: resolvedSide },
+    });
+    return rows.length === 1 ? rows[0] : null;
   }
 
   async getCashBalance(

@@ -2,6 +2,7 @@ import Decimal from "decimal.js";
 import { isValidLot, Money, roundToTick } from "@stonks/core-domain";
 import {
   DomainError,
+  PlaceBracketOrderCommand as PlaceBracketOrderCommandSchema,
   PlaceOrderCommand as PlaceOrderCommandSchema,
 } from "@stonks/contracts";
 import type {
@@ -11,6 +12,9 @@ import type {
   MarginPolicy,
   MarginPolicyProvider,
   Order,
+  OrderActivation,
+  OrderLinkType,
+  PlaceBracketOrderCommand,
   PlaceOrderCommand,
   PositionSide,
   PriceProvider,
@@ -104,6 +108,29 @@ export class StandardTradingEngine {
 
   /** 発注: Zod 検証 → 単元/呼値ルール＋現金/保有の事前チェック → PENDING 受付。 */
   async placeOrder(cmd: PlaceOrderCommand): Promise<Order> {
+    const order = await this.buildValidatedOrder(cmd);
+    await this.orders.save(order);
+    return order;
+  }
+
+  /**
+   * `PlaceOrderCommand` を Zod 検証し、単元/呼値ルール＋資金事前チェックを通した上で
+   * `Order`（PENDING）を構築する（保存はしない）。単発・複合（OCO/IFD/bracket）の
+   * 各脚で共通利用する。`link` を渡すと複合注文の link フィールドを付与する。
+   *
+   * `activation === "WAITING"`（IFD/bracket 子）は親約定まで休眠＝資金が拘束されないため、
+   * 発注時点の事前チェック（資金/保有）はスキップする。発効（ACTIVE 化）後に
+   * `evaluateOpenOrders` が約定時の不変条件で評価する。
+   */
+  private async buildValidatedOrder(
+    cmd: PlaceOrderCommand,
+    link?: {
+      linkGroupId?: string;
+      linkType?: OrderLinkType;
+      parentOrderId?: string;
+      activation?: OrderActivation;
+    },
+  ): Promise<Order> {
     const parsed = PlaceOrderCommandSchema.safeParse(cmd);
     if (!parsed.success) {
       throw new DomainError("VALIDATION", "invalid PlaceOrderCommand", parsed.error.issues);
@@ -136,13 +163,17 @@ export class StandardTradingEngine {
     // 資金区分。未指定/CASH=現物、MARGIN=信用。
     const isMargin = command.marginType === "MARGIN";
 
-    if (isMargin) {
-      // 信用: 銘柄ポリシーを解決し（null=信用不可→拒否）、必要保証金を充足判定する。
-      // ショート（SELL × MARGIN）は現物の保有数量チェックを通さず別ルートで建てる。
-      await this.assertMarginAffordable(command, instrument, limitPrice);
-    } else {
-      // 現物: 現金（買い）/ 保有（売り）の事前チェック。
-      await this.assertAffordable(command, instrument, limitPrice);
+    // WAITING（IFD/bracket 子）は休眠中で資金未拘束のため事前チェックを保留する。
+    const waiting = link?.activation === "WAITING";
+    if (!waiting) {
+      if (isMargin) {
+        // 信用: 銘柄ポリシーを解決し（null=信用不可→拒否）、必要保証金を充足判定する。
+        // ショート（SELL × MARGIN）は現物の保有数量チェックを通さず別ルートで建てる。
+        await this.assertMarginAffordable(command, instrument, limitPrice);
+      } else {
+        // 現物: 現金（買い）/ 保有（売り）の事前チェック。
+        await this.assertAffordable(command, instrument, limitPrice);
+      }
     }
 
     const now = this.clock().toISOString();
@@ -159,13 +190,135 @@ export class StandardTradingEngine {
       timeInForce: command.timeInForce,
       // MARGIN のみ明示。CASH/未指定は現物として marginType を載せず後方互換に保つ。
       ...(isMargin ? { marginType: "MARGIN" as const } : {}),
+      // 複合注文の link フィールド（未指定の単発は付与せず従来挙動）。
+      ...(link?.linkGroupId !== undefined ? { linkGroupId: link.linkGroupId } : {}),
+      ...(link?.linkType !== undefined ? { linkType: link.linkType } : {}),
+      ...(link?.parentOrderId !== undefined
+        ? { parentOrderId: link.parentOrderId }
+        : {}),
+      ...(link?.activation !== undefined ? { activation: link.activation } : {}),
       status: "PENDING",
       createdAt: now,
       updatedAt: now,
     };
 
-    await this.orders.save(order);
     return order;
+  }
+
+  /**
+   * 複合注文（OCO / IFD / bracket）の発注（spec §2.2 P2。Phase 5）。
+   *
+   * 各 leg/parent/child を `PlaceOrderCommand` として個別検証し、link フィールドを張った
+   * `Order` 群を作成・保存して返す。検証失敗・銘柄不在・単元/資金違反は `DomainError`。
+   * 1 脚でも検証/事前チェックに失敗したら、どの注文も保存せず全体を弾く（all-or-nothing）。
+   *
+   * - OCO: 2 脚に共通 `linkGroupId`＋`linkType="OCO"`・両 `activation="ACTIVE"`。
+   * - IFD: 親 ACTIVE、子（1 本以上）に `parentOrderId=親id`＋`linkType="IFD"`＋`WAITING`。
+   * - BRACKET: 親 ACTIVE、子 2 本に共通 `linkGroupId`(OCO)＋`parentOrderId=親id`＋
+   *   `linkType="OCO"`＋`WAITING`（親約定→子発効→子の片約定で他方取消）。
+   */
+  async placeBracketOrder(cmd: PlaceBracketOrderCommand): Promise<Order[]> {
+    const parsed = PlaceBracketOrderCommandSchema.safeParse(cmd);
+    if (!parsed.success) {
+      throw new DomainError(
+        "VALIDATION",
+        "invalid PlaceBracketOrderCommand",
+        parsed.error.issues,
+      );
+    }
+    const command = parsed.data;
+
+    // 各脚は z.unknown() なので PlaceOrderCommand として個別に再検証する（price 妥当性等）。
+    const asLeg = (raw: unknown): PlaceOrderCommand => raw as PlaceOrderCommand;
+
+    let built: Order[];
+    if (command.kind === "OCO") {
+      const linkGroupId = this.generateId();
+      const [a, b] = command.legs;
+      // 検証は buildValidatedOrder 内で行う。失敗時は例外で全体中止（未保存）。
+      const o1 = await this.buildValidatedOrder(asLeg(a), {
+        linkGroupId,
+        linkType: "OCO",
+        activation: "ACTIVE",
+      });
+      const o2 = await this.buildValidatedOrder(asLeg(b), {
+        linkGroupId,
+        linkType: "OCO",
+        activation: "ACTIVE",
+      });
+      built = [o1, o2];
+    } else if (command.kind === "IFD") {
+      const parent = await this.buildValidatedOrder(asLeg(command.parent), {
+        linkType: "IFD",
+        activation: "ACTIVE",
+      });
+      const children: Order[] = [];
+      for (const child of command.children) {
+        children.push(
+          await this.buildValidatedOrder(asLeg(child), {
+            parentOrderId: parent.id,
+            linkType: "IFD",
+            activation: "WAITING",
+          }),
+        );
+      }
+      built = [parent, ...children];
+    } else {
+      // BRACKET: 親 IFD・子 2 本は共通 linkGroupId(OCO)＋共通 parentOrderId(親)。
+      const parent = await this.buildValidatedOrder(asLeg(command.parent), {
+        linkType: "IFD",
+        activation: "ACTIVE",
+      });
+      const linkGroupId = this.generateId();
+      const [c1, c2] = command.children;
+      const child1 = await this.buildValidatedOrder(asLeg(c1), {
+        linkGroupId,
+        linkType: "OCO",
+        parentOrderId: parent.id,
+        activation: "WAITING",
+      });
+      const child2 = await this.buildValidatedOrder(asLeg(c2), {
+        linkGroupId,
+        linkType: "OCO",
+        parentOrderId: parent.id,
+        activation: "WAITING",
+      });
+      built = [parent, child1, child2];
+    }
+
+    // 全脚の検証を通過してからまとめて保存（all-or-nothing）。
+    for (const order of built) {
+      await this.orders.save(order);
+    }
+    return built;
+  }
+
+  /**
+   * 複合注文グループ単位の取消（spec §2.2 P2。Phase 5）。
+   *
+   * `linkGroupId` に属するオープン注文（PENDING / PARTIALLY_FILLED）と、休眠中の
+   * WAITING 子を一括 CANCELLED にする。約定済み/取消済み等の終端状態は据え置く。
+   * 取消した注文（更新後）を返す。
+   */
+  async cancelOrderGroup(linkGroupId: string): Promise<Order[]> {
+    const group = await this.orders.findByLinkGroupId(linkGroupId);
+    const cancelled: Order[] = [];
+    const now = this.clock().toISOString();
+    for (const order of group) {
+      // オープン（PENDING/PARTIALLY_FILLED）または休眠中（WAITING）を取消対象とする。
+      const isOpen = OPEN_STATUSES.has(order.status);
+      const isWaiting = order.activation === "WAITING";
+      if (!isOpen && !isWaiting) continue;
+      const updated: Order = {
+        ...order,
+        status: "CANCELLED",
+        updatedAt: now,
+      };
+      await this.orders.update(updated);
+      this.triggered.delete(order.id);
+      cancelled.push(updated);
+    }
+    return cancelled;
   }
 
   /** 取消: PENDING / PARTIALLY_FILLED のみ可。それ以外は ORDER_NOT_CANCELLABLE。 */
@@ -187,6 +340,8 @@ export class StandardTradingEngine {
     };
     await this.orders.update(updated);
     this.triggered.delete(orderId);
+    // 親注文を取消したら、未発効の WAITING 子も連動 CANCELLED（孤児防止。Phase 5）。
+    await this.cancelWaitingChildren(orderId, this.clock());
     return updated;
   }
 
@@ -198,7 +353,21 @@ export class StandardTradingEngine {
     const open = await this.orders.findOpen();
     const trades: Trade[] = [];
 
-    for (const order of open) {
+    for (const snapshot of open) {
+      // 同一パス内の先行約定がカスケード（OCO 取消・IFD 発効）でこの注文を
+      // 変化させている可能性があるため、評価直前に最新状態を読み直す。
+      const order = (await this.orders.findById(snapshot.id)) ?? snapshot;
+
+      // 先行カスケードで終端状態になっていれば評価しない（OCO 取消済み等）。
+      if (!OPEN_STATUSES.has(order.status)) continue;
+
+      // WAITING（IFD/bracket 子）は親約定までエンジン評価から除外（休眠）。
+      // 同一パス内で親が約定し子が ACTIVE 化しても、このパスでは約定させない
+      //（発効は次パスから有効）。そのためパス開始時スナップショットの activation で判定する。
+      if (snapshot.activation === "WAITING" || order.activation === "WAITING") {
+        continue;
+      }
+
       // DAY 失効: 発注日（UTC 日付）より後なら EXPIRED。
       if (order.timeInForce === "DAY" && this.isExpired(order, ctx.now)) {
         await this.orders.update({
@@ -207,6 +376,8 @@ export class StandardTradingEngine {
           updatedAt: ctx.now.toISOString(),
         });
         this.triggered.delete(order.id);
+        // 親が EXPIRED したら未発効の WAITING 子も連動 CANCELLED（孤児防止）。
+        await this.cancelWaitingChildren(order.id, ctx.now);
         continue;
       }
 
@@ -297,7 +468,72 @@ export class StandardTradingEngine {
     await this.orders.update(updated);
     if (status === "FILLED") this.triggered.delete(order.id);
 
+    // 複合注文カスケード（spec §2.2 P2。Phase 5）。
+    // 約定（FILLED または「最初の」部分約定。filledQuantity が 0→正に変わった瞬間）で発火。
+    const isFirstFill = order.filledQuantity === 0 && newFilled > 0;
+    if (isFirstFill) {
+      await this.cascadeOnFill(updated, now);
+    }
+
     return trade;
+  }
+
+  /**
+   * 約定確定時の複合注文カスケード（Phase 5）。
+   * (a) OCO: 同 `linkGroupId` の他注文を CANCELLED（自身は除く）。
+   * (b) IFD: 約定注文を親に持つ WAITING 子を `activation="ACTIVE"` に発効。
+   * bracket は親約定で子 2 本が ACTIVE 化し、後に子の片約定で (a) が連鎖する。
+   */
+  private async cascadeOnFill(filled: Order, now: Date): Promise<void> {
+    // (a) OCO: 同グループの他注文を取消す（オープン/WAITING のみ。終端状態は据え置き）。
+    if (filled.linkGroupId !== undefined) {
+      const group = await this.orders.findByLinkGroupId(filled.linkGroupId);
+      for (const other of group) {
+        if (other.id === filled.id) continue;
+        const isOpen = OPEN_STATUSES.has(other.status);
+        const isWaiting = other.activation === "WAITING";
+        if (!isOpen && !isWaiting) continue;
+        await this.orders.update({
+          ...other,
+          status: "CANCELLED",
+          updatedAt: now.toISOString(),
+        });
+        this.triggered.delete(other.id);
+      }
+    }
+
+    // (b) IFD: 約定注文を親に持つ WAITING 子を ACTIVE に発効させる。
+    const children = await this.orders.findByParentOrderId(filled.id);
+    for (const child of children) {
+      if (child.activation !== "WAITING") continue;
+      if (!OPEN_STATUSES.has(child.status)) continue;
+      await this.orders.update({
+        ...child,
+        activation: "ACTIVE",
+        updatedAt: now.toISOString(),
+      });
+    }
+  }
+
+  /**
+   * 親が EXPIRED/CANCELLED された際に、未発効の WAITING 子を連動 CANCELLED する（Phase 5）。
+   * 親約定前に親が失効/取消されると子は永遠に発効しないため、孤児化を防ぐ。
+   */
+  private async cancelWaitingChildren(
+    parentOrderId: string,
+    now: Date,
+  ): Promise<void> {
+    const children = await this.orders.findByParentOrderId(parentOrderId);
+    for (const child of children) {
+      if (child.activation !== "WAITING") continue;
+      if (!OPEN_STATUSES.has(child.status)) continue;
+      await this.orders.update({
+        ...child,
+        status: "CANCELLED",
+        updatedAt: now.toISOString(),
+      });
+      this.triggered.delete(child.id);
+    }
   }
 
   /** STOP / STOP_LIMIT のトリガ判定。トリガ済みなら true を維持。 */

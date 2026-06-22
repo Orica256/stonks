@@ -6,7 +6,21 @@
 ## 責務
 - **発注 (`placeOrder`)**: `PlaceOrderCommand` を Zod 検証 → 単元株（`isValidLot`）・呼値刻み（`roundToTick`）＋現金/保有の事前チェック → `PENDING` 受付。
 - **取消 (`cancelOrder`)**: `PENDING` / `PARTIALLY_FILLED` のみ取消可。それ以外は `DomainError("ORDER_NOT_CANCELLABLE")`。
-- **評価 (`evaluateOpenOrders`)**: `PriceProvider` から価格を取り、`FillModel` で約定判定。成行=即時、指値=価格到達、逆指値/ストップリミット=トリガ。部分約定・状態遷移・DAY 当日失効を処理し、約定ごとに `Trade` と手数料（`FeeModel`）を生成。
+- **評価 (`evaluateOpenOrders`)**: `PriceProvider` から価格を取り、`FillModel` で約定判定。成行=即時、指値=価格到達、逆指値/ストップリミット=トリガ。部分約定・状態遷移・DAY 当日失効を処理し、約定ごとに `Trade` と手数料（`FeeModel`）を生成。複合注文のカスケード（後述）もこの中で処理する。
+- **複合注文 (`placeBracketOrder` / `cancelOrderGroup`。Phase 5)**: OCO / IFD / bracket を発注し、約定/取消の連動（カスケード）を管理する。
+
+### 複合注文（OCO / IFD / bracket。spec §2.2 P2）
+- **発注 (`placeBracketOrder(cmd: PlaceBracketOrderCommand)`)**: `kind` で分岐。各 leg/parent/child を `PlaceOrderCommand` として個別に Zod 検証（price 妥当性・単元・現金/保有チェックを流用）し、全脚通過後にまとめて保存（all-or-nothing。1 脚でも不正なら `DomainError` で全体を弾き、何も保存しない）。`Order[]` を返す。
+  - `OCO`: 2 脚に共通 `linkGroupId`＋`linkType="OCO"`、両 `activation="ACTIVE"`。
+  - `IFD`: 親 `activation="ACTIVE"`、子（1 本以上）に `parentOrderId=親id`＋`linkType="IFD"`＋`activation="WAITING"`。
+  - `BRACKET`: 親 ACTIVE、子 2 本に共通 `linkGroupId`(OCO)＋`parentOrderId=親id`＋`linkType="OCO"`＋`activation="WAITING"`。
+- **カスケード（`evaluateOpenOrders` 内）**:
+  - `activation="WAITING"` の注文は約定評価から**除外**（休眠）。`findOpen` は `status=PENDING` を返すため `activation` で明示的に弾く。
+  - 約定確定時（FILLED または「最初の」部分約定 = `filledQuantity` が 0→正）に、(a) 同 `linkGroupId` の他注文を `CANCELLED`（OCO）、(b) 約定注文を親に持つ WAITING 子を `activation="ACTIVE"` に発効（IFD）。bracket は親約定で子 2 本が発効→子の片約定で他方取消、と連鎖する。
+  - 同一パス内の整合性: 評価直前に各注文を `findById` で読み直し、先行約定のカスケードで終端状態化/取消済みになっていれば評価しない。WAITING はパス開始時スナップショットの `activation` でも判定し、同一パスで発効した子は**次パスから**約定対象とする。
+  - 孤児防止: 親が EXPIRED（DAY 失効）/`cancelOrder` された場合、未発効の WAITING 子を連動 `CANCELLED` にする。
+- **グループ取消 (`cancelOrderGroup(linkGroupId)`)**: 同 `linkGroupId` のオープン（PENDING/PARTIALLY_FILLED）と WAITING 子を一括 `CANCELLED`。終端状態（FILLED/CANCELLED 等）は据え置く。取消した `Order[]` を返す。
+- **リポジトリポート拡張**: カスケード解決のため `OrderRepository` に `findByLinkGroupId` / `findByParentOrderId` を追加（in-memory 実装同梱）。
 
 ## 設計上の制約（厳守）
 - **価格は `PriceProvider` IF 経由のみ**。`market-data` を直接 import しない（spec §4.3・§6.2）。

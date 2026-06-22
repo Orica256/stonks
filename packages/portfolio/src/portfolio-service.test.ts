@@ -214,6 +214,92 @@ describe("getHistory — 資産推移", () => {
   });
 });
 
+describe("applyTrade — CASH/MARGIN 建玉分離（Phase 5）", () => {
+  it("同一銘柄・同方向で CASH と MARGIN が別建玉として並存し独立に積まれる", async () => {
+    const { repo, svc } = makeSvc();
+    await svc.deposit(ACC, { amount: "10000000", currency: "JPY" });
+
+    // CASH 現物: 100株@1000 → avg 1000
+    await svc.applyTrade(trade({ quantity: 100, price: "1000", fee: "0" }));
+    // MARGIN 信用: 50株@1200 → avg 1200（CASH とは別建玉）
+    await svc.applyTrade(
+      trade({ quantity: 50, price: "1200", fee: "0", marginType: "MARGIN" }),
+    );
+
+    // 厳密キーでそれぞれ独立に引ける。
+    const cash = await repo.getPosition(ACC, TOY, "LONG", "CASH");
+    const margin = await repo.getPosition(ACC, TOY, "LONG", "MARGIN");
+    expect(cash?.quantity).toBe(100);
+    expect(new Decimal(cash!.avgCost).equals("1000")).toBe(true);
+    expect(cash?.marginType).toBeUndefined(); // 現物は未設定（後方互換）
+    expect(margin?.quantity).toBe(50);
+    expect(new Decimal(margin!.avgCost).equals("1200")).toBe(true);
+    expect(margin?.marginType).toBe("MARGIN");
+
+    // listPositions は 2 行（CASH/MARGIN 別行）。
+    const positions = await repo.listPositions(ACC);
+    expect(positions).toHaveLength(2);
+  });
+
+  it("CASH と MARGIN を別行として評価し、各々の含み損益が独立に出る", async () => {
+    const { repo, svc, price } = makeSvc();
+    await svc.deposit(ACC, { amount: "10000000", currency: "JPY" });
+    await svc.applyTrade(trade({ quantity: 100, price: "1000", fee: "0" })); // CASH avg 1000
+    await svc.applyTrade(
+      trade({ quantity: 50, price: "1200", fee: "0", marginType: "MARGIN" }),
+    ); // MARGIN avg 1200
+    price.setPrice(TOY, { amount: "1500", currency: "JPY" });
+
+    const views = await svc.getPositions(ACC);
+    expect(views).toHaveLength(2);
+    const cashView = views.find((v) => (v.marginType ?? "CASH") === "CASH")!;
+    const marginView = views.find((v) => v.marginType === "MARGIN")!;
+    // CASH: (1500-1000)*100 = 50000
+    expect(new Decimal(cashView.marketValue.amount).equals("150000")).toBe(true);
+    expect(new Decimal(cashView.unrealizedPnl.amount).equals("50000")).toBe(true);
+    // MARGIN: (1500-1200)*50 = 15000
+    expect(new Decimal(marginView.marketValue.amount).equals("75000")).toBe(true);
+    expect(new Decimal(marginView.unrealizedPnl.amount).equals("15000")).toBe(true);
+
+    // サマリの建玉評価合計は両建玉の和（150000 + 75000）。
+    const summary = await svc.getSummary(ACC);
+    expect(new Decimal(summary.positionsValue.amount).equals("225000")).toBe(true);
+    expect(new Decimal(summary.unrealizedPnl.amount).equals("65000")).toBe(true);
+    await assertCashMatchesLedger(repo, ACC);
+  });
+
+  it("MARGIN の売却は MARGIN 建玉のみを取り崩し CASH 建玉は不変", async () => {
+    const { repo, svc } = makeSvc();
+    await svc.deposit(ACC, { amount: "10000000", currency: "JPY" });
+    await svc.applyTrade(trade({ quantity: 100, price: "1000", fee: "0" })); // CASH 100
+    await svc.applyTrade(
+      trade({ quantity: 80, price: "1200", fee: "0", marginType: "MARGIN" }),
+    ); // MARGIN 80
+    // MARGIN を 30 売却。
+    await svc.applyTrade(
+      trade({ side: "SELL", quantity: 30, price: "1500", fee: "0", marginType: "MARGIN" }),
+    );
+
+    const cash = await repo.getPosition(ACC, TOY, "LONG", "CASH");
+    const margin = await repo.getPosition(ACC, TOY, "LONG", "MARGIN");
+    expect(cash?.quantity).toBe(100); // CASH は不変
+    expect(margin?.quantity).toBe(50); // MARGIN 80 - 30
+  });
+
+  it("CASH 売却は CASH の保有を超えられない（別建玉 MARGIN は数量に算入しない）", async () => {
+    const { svc } = makeSvc();
+    await svc.deposit(ACC, { amount: "10000000", currency: "JPY" });
+    await svc.applyTrade(trade({ quantity: 40, price: "1000", fee: "0" })); // CASH 40
+    await svc.applyTrade(
+      trade({ quantity: 100, price: "1000", fee: "0", marginType: "MARGIN" }),
+    ); // MARGIN 100
+    // CASH 50 売却は CASH 保有 40 を超えるので拒否（MARGIN 100 は合算しない）。
+    await expect(
+      svc.applyTrade(trade({ side: "SELL", quantity: 50, price: "1000" })),
+    ).rejects.toThrow(/cannot sell/);
+  });
+});
+
 describe("applyCorporateAction — DIVIDEND（配当受取）", () => {
   it("保有数量 × 1株配当を建玉通貨で現金へ加算し CashLedger(DIVIDEND) を起こす", async () => {
     const { repo, svc } = makeSvc();

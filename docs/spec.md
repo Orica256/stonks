@@ -257,6 +257,7 @@ CashBalance
 Position（保有）
   id, accountId, instrumentId, quantity, avgCost, openedAt
   (信用拡張: side(LONG|SHORT), margin)
+  一意キー: (accountId, instrumentId, side, marginType)  ── CASH/MARGIN 同方向建玉を分離（Phase 5）
 
 Order（注文）
   id, accountId, instrumentId, side(BUY|SELL),
@@ -344,6 +345,9 @@ interface TradingEngine {
   cancelOrder(orderId: string): Promise<Order>;
   // マッチング: 価格更新やティックで評価し約定を生成
   evaluateOpenOrders(ctx: { now: Date; priceProvider: PriceProvider }): Promise<Trade[]>;
+  // 複合注文（OCO/IFD/bracket。P2。optional）。片約定で他方取消／親約定で子発効をカスケード
+  placeBracketOrder?(cmd: PlaceBracketOrderCommand): Promise<Order[]>;
+  cancelOrderGroup?(linkGroupId: string): Promise<Order[]>;            // グループ一括取消（P2。optional）
 }
 interface FeeModel { calculate(input): { fee: Money } }    // 市場別手数料
 interface FillModel { tryFill(order, marketPrice): Fill | null } // 約定/スリッページ

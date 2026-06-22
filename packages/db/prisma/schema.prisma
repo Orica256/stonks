@@ -77,6 +77,18 @@ enum PositionSide {
   SHORT
 }
 
+// 複合注文のリンク種別（Phase 5。contracts OrderLinkType）。
+enum OrderLinkType {
+  OCO
+  IFD
+}
+
+// 注文の発効状態（Phase 5。contracts OrderActivation）。
+enum OrderActivation {
+  ACTIVE
+  WAITING
+}
+
 // 資金区分（現物/信用。Phase 3。contracts MarginType）。
 enum MarginType {
   CASH
@@ -260,11 +272,12 @@ model Position {
   account    Account    @relation(fields: [accountId], references: [id])
   instrument Instrument @relation(fields: [instrumentId], references: [id])
 
-  // 一意キーは現物フロー後方互換のため [accountId, instrumentId, side] のまま据え置く
-  // （apps/api の upsert キー accountId_instrumentId_side を壊さない）。
-  // CASH/MARGIN 建玉を同一 (account, instrument, side) で別行管理したくなった場合は、
-  // marginType を含めた一意キーへの変更を api 担当と調整して行うこと（申し送り参照）。
-  @@unique([accountId, instrumentId, side])
+  // 一意キーは [accountId, instrumentId, side, marginType]（Phase 5）。
+  // 同一 (account, instrument, side) の CASH 現物と MARGIN 信用の同方向建玉を別行に分離する
+  // （contracts POSITION_UNIQUE_KEY と一致）。marginType は @default(CASH) のため既存の現物行は
+  // marginType=CASH として一意に保たれ後方互換。apps/api の upsert キーは
+  // accountId_instrumentId_side → accountId_instrumentId_side_marginType へ変更が必要（申し送り）。
+  @@unique([accountId, instrumentId, side, marginType])
 }
 
 model Order {
@@ -279,6 +292,11 @@ model Order {
   stopPrice      Decimal?
   timeInForce    TimeInForce @default(DAY)
   marginType     MarginType  @default(CASH) // 資金区分（Phase 3。既定 CASH=現物）
+  // ── 複合注文（OCO/IFD/bracket。Phase 5。単発は NULL/ACTIVE で従来挙動）──
+  linkGroupId    String? // OCO/bracket 子のグループ ID（片約定で同グループ取消）
+  linkType       OrderLinkType? // OCO|IFD（単発は NULL）
+  parentOrderId  String? // IFD/bracket の親注文（約定で子を発効）
+  activation     OrderActivation @default(ACTIVE) // WAITING=親約定待ちで休眠
   status         OrderStatus @default(PENDING)
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
@@ -288,6 +306,8 @@ model Order {
   trades     Trade[]
 
   @@index([accountId, status])
+  @@index([linkGroupId])
+  @@index([parentOrderId])
 }
 
 model Trade {

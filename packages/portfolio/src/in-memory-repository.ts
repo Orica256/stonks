@@ -3,7 +3,9 @@ import type {
   CashLedgerEntry,
   Currency,
   EquityPoint,
+  MarginType,
   Position,
+  PositionSide,
   RealizedPnl,
   RealizedPnlWithLots,
   TaxLot,
@@ -11,8 +13,18 @@ import type {
 } from "@stonks/contracts";
 import type { PortfolioRepository } from "./repository.js";
 
-const posKey = (accountId: string, instrumentId: string): string =>
-  `${accountId}::${instrumentId}`;
+/**
+ * 建玉の一意キー（spec §5.1 / `POSITION_UNIQUE_KEY`。Phase 5）。
+ * `[accountId, instrumentId, side, marginType]` で一意化し、同一 (account, instrument,
+ * side) の CASH 現物 / MARGIN 信用建玉を別行に分離する。`side`/`marginType` 未指定は
+ * 既存挙動どおり LONG / CASH とみなす（`marginType ?? "CASH"`）。
+ */
+const posKey = (
+  accountId: string,
+  instrumentId: string,
+  side: PositionSide = "LONG",
+  marginType: MarginType = "CASH",
+): string => `${accountId}::${instrumentId}::${side}::${marginType}`;
 const cashKey = (accountId: string, currency: Currency): string =>
   `${accountId}::${currency}`;
 
@@ -34,8 +46,29 @@ export class InMemoryPortfolioRepository implements PortfolioRepository {
   async getPosition(
     accountId: string,
     instrumentId: string,
+    side?: PositionSide,
+    marginType?: MarginType,
   ): Promise<Position | undefined> {
-    return this.positions.get(posKey(accountId, instrumentId));
+    // marginType が明示されたら厳密キーで引く（Phase 5: CASH/MARGIN を別建玉に分離）。
+    if (marginType !== undefined) {
+      return this.positions.get(
+        posKey(accountId, instrumentId, side ?? "LONG", marginType),
+      );
+    }
+    // 後方互換: marginType 未指定は (side, CASH) を優先し、無ければ当該 (account,
+    // instrument, side) の単一建玉へフォールバック（CASH/MARGIN いずれか一方しか
+    // 無い既存フローで従来どおり 1 建玉を返す）。
+    const wantSide = side ?? "LONG";
+    const cash = this.positions.get(
+      posKey(accountId, instrumentId, wantSide, "CASH"),
+    );
+    if (cash) return cash;
+    return [...this.positions.values()].find(
+      (p) =>
+        p.accountId === accountId &&
+        p.instrumentId === instrumentId &&
+        (p.side ?? "LONG") === wantSide,
+    );
   }
 
   async listPositions(accountId: string): Promise<Position[]> {
@@ -43,13 +76,47 @@ export class InMemoryPortfolioRepository implements PortfolioRepository {
   }
 
   async savePosition(position: Position): Promise<void> {
-    this.positions.set(posKey(position.accountId, position.instrumentId), {
-      ...position,
-    });
+    this.positions.set(
+      posKey(
+        position.accountId,
+        position.instrumentId,
+        position.side ?? "LONG",
+        position.marginType ?? "CASH",
+      ),
+      { ...position },
+    );
   }
 
-  async removePosition(accountId: string, instrumentId: string): Promise<void> {
-    this.positions.delete(posKey(accountId, instrumentId));
+  async removePosition(
+    accountId: string,
+    instrumentId: string,
+    side?: PositionSide,
+    marginType?: MarginType,
+  ): Promise<void> {
+    if (marginType !== undefined) {
+      this.positions.delete(
+        posKey(accountId, instrumentId, side ?? "LONG", marginType),
+      );
+      return;
+    }
+    // 後方互換: marginType 未指定は (side, CASH) を優先削除。無ければ当該 (account,
+    // instrument, side) の単一建玉のキーを解決して削除する。
+    const wantSide = side ?? "LONG";
+    const cashK = posKey(accountId, instrumentId, wantSide, "CASH");
+    if (this.positions.has(cashK)) {
+      this.positions.delete(cashK);
+      return;
+    }
+    for (const [k, p] of this.positions) {
+      if (
+        p.accountId === accountId &&
+        p.instrumentId === instrumentId &&
+        (p.side ?? "LONG") === wantSide
+      ) {
+        this.positions.delete(k);
+        return;
+      }
+    }
   }
 
   async getCashBalance(

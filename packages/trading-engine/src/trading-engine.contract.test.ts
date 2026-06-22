@@ -32,6 +32,9 @@ describe("contract conformance", () => {
     expect(typeof engine.placeOrder).toBe("function");
     expect(typeof engine.cancelOrder).toBe("function");
     expect(typeof engine.evaluateOpenOrders).toBe("function");
+    // Phase 5: 複合注文の optional メソッドを実装している。
+    expect(typeof engine.placeBracketOrder).toBe("function");
+    expect(typeof engine.cancelOrderGroup).toBe("function");
   });
 
   it("StandardFeeModel satisfies FeeModel and returns Money", () => {

@@ -8,6 +8,7 @@ export * from "./instrument.js";
 export * from "./market-data.js";
 export * from "./account.js";
 export * from "./order.js";
+export * from "./order-link.js";
 export * from "./trade.js";
 export * from "./ledger.js";
 export * from "./margin.js";

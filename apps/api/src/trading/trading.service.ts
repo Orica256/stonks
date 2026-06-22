@@ -1,10 +1,12 @@
 import { Inject, Injectable } from "@nestjs/common";
-import type {
-  Order,
-  PlaceOrderCommand,
-  PortfolioService,
-  PriceProvider,
-  Trade,
+import {
+  DomainError,
+  type Order,
+  type PlaceBracketOrderCommand,
+  type PlaceOrderCommand,
+  type PortfolioService,
+  type PriceProvider,
+  type Trade,
 } from "@stonks/contracts";
 import type { StandardTradingEngine } from "@stonks/trading-engine";
 import { TOKENS } from "../common/tokens.js";
@@ -34,6 +36,35 @@ export class TradingService {
 
   cancelOrder(orderId: string): Promise<Order> {
     return this.engine.cancelOrder(orderId);
+  }
+
+  /**
+   * 複合注文（OCO / IFD / bracket）の発注（Phase 5）。
+   * 各 leg/parent/child は PlaceOrderCommand として trading-engine が個別検証し、
+   * link を張った Order 群を返す。エンジンが optional メソッド未実装なら CONFLICT。
+   */
+  placeBracketOrder(cmd: PlaceBracketOrderCommand): Promise<Order[]> {
+    if (!this.engine.placeBracketOrder) {
+      throw new DomainError(
+        "CONFLICT",
+        "compound orders are not supported by the trading engine",
+      );
+    }
+    return this.engine.placeBracketOrder(cmd);
+  }
+
+  /**
+   * 複合注文グループ単位の取消（Phase 5）。
+   * linkGroupId に属するオープン/WAITING 注文を一括取消し、取消後の Order 群を返す。
+   */
+  cancelOrderGroup(linkGroupId: string): Promise<Order[]> {
+    if (!this.engine.cancelOrderGroup) {
+      throw new DomainError(
+        "CONFLICT",
+        "order group cancellation is not supported by the trading engine",
+      );
+    }
+    return this.engine.cancelOrderGroup(linkGroupId);
   }
 
   /**
