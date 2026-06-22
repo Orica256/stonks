@@ -111,6 +111,54 @@ describe("apps/api integration", () => {
     expect(Number(summary.body.cash.amount)).toBeLessThan(1000000);
   });
 
+  it("lists corporate actions in range (dividend/split)", async () => {
+    market.setCorporateActions(instrument.id, [
+      {
+        instrumentId: instrument.id,
+        type: "DIVIDEND",
+        exDate: "2024-03-15T00:00:00.000Z",
+        value: "50",
+      },
+      {
+        instrumentId: instrument.id,
+        type: "SPLIT",
+        exDate: "2025-01-10T00:00:00.000Z",
+        value: "2",
+      },
+    ]);
+
+    const res = await request(app.getHttpServer())
+      .get(`/instruments/${encodeURIComponent(instrument.id)}/corporate-actions`)
+      .query({ from: "2024-01-01T00:00:00.000Z", to: "2024-12-31T00:00:00.000Z" })
+      .expect(200);
+    // exDate が範囲内の DIVIDEND のみ（SPLIT は 2025 で範囲外）。
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].type).toBe("DIVIDEND");
+  });
+
+  it("applies a dividend to the account (cash credited)", async () => {
+    // 直前のライフサイクルで acc-1 は 100 株保有・現金 < 1,000,000。
+    const before = await request(app.getHttpServer())
+      .get(`/accounts/${accountId}/summary`)
+      .expect(200);
+    const cashBefore = Number(before.body.cash.amount);
+
+    await request(app.getHttpServer())
+      .post(`/accounts/${accountId}/corporate-actions`)
+      .send({
+        instrumentId: instrument.id,
+        type: "DIVIDEND",
+        exDate: "2024-03-15T00:00:00.000Z",
+        value: "50", // 1 株あたり 50 JPY × 100 株 = 5,000 JPY 受領
+      })
+      .expect(201);
+
+    const after = await request(app.getHttpServer())
+      .get(`/accounts/${accountId}/summary`)
+      .expect(200);
+    expect(Number(after.body.cash.amount)).toBeGreaterThan(cashBefore);
+  });
+
   it("cancels an open order", async () => {
     const placed = await request(app.getHttpServer())
       .post(`/accounts/${accountId}/orders`)
