@@ -156,9 +156,23 @@ export interface AgentTradingService {
 
 export interface PerformanceEvaluator {
   snapshot(accountId: string, at: Date): Promise<PerformanceSnapshot>;
+  /**
+   * ベンチ比較。公正に成立しない場合は値を捏造せず throw する（spec §9）。
+   * 理由を握って提示したい呼び出し側（api）は {@link compareResult} を使う。
+   */
   compare(
     accountId: string,
     benchmark: BenchmarkId,
     range: { from: Date; to: Date },
   ): Promise<BenchmarkComparison>;
+  /**
+   * ベンチ比較の結果を「成立/不成立（理由付き）」として返す（throw しない）。
+   * api はこれを使い、比較不能を `null` 化する代わりに理由をクライアントへ提示する
+   * （spec §2.7 P1 ベンチ比較）。
+   */
+  compareResult(
+    accountId: string,
+    benchmark: BenchmarkId,
+    range: { from: Date; to: Date },
+  ): Promise<BenchmarkComparisonResult>;
 }
