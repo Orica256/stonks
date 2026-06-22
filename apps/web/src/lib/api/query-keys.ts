@@ -11,8 +11,8 @@ export const queryKeys = {
   summary: (accountId: string) => ["summary", accountId] as const,
   trades: (accountId: string) => ["trades", accountId] as const,
   history: (accountId: string) => ["history", accountId] as const,
-  performance: (accountId: string, range?: string) =>
-    ["performance", accountId, range ?? "default"] as const,
+  performance: (accountId: string, range?: string, benchmark?: string) =>
+    ["performance", accountId, range ?? "default", benchmark ?? "default"] as const,
   decisions: (accountId: string) => ["decisions", accountId] as const,
   capitalGainsTax: (
     accountId: string,
@@ -21,6 +21,16 @@ export const queryKeys = {
     [
       "tax",
       accountId,
+      range?.from ?? "all",
+      range?.to ?? "all",
+    ] as const,
+  corporateActions: (
+    instrumentId: string,
+    range?: { from?: string; to?: string },
+  ) =>
+    [
+      "corporate-actions",
+      instrumentId,
       range?.from ?? "all",
       range?.to ?? "all",
     ] as const,

@@ -2,6 +2,7 @@
 
 import { InstrumentSearch } from "@/features/instruments/instrument-search";
 import { QuotePanel } from "@/features/instruments/quote-panel";
+import { CorporateActionsPanel } from "@/features/instruments/corporate-actions-panel";
 import { ChartPanel } from "@/features/chart/chart-panel";
 import { OrderForm } from "@/features/order/order-form";
 import { useSelectionStore } from "@/stores/selection-store";
@@ -21,7 +22,13 @@ export default function TradePage(): JSX.Element {
         <QuotePanel instrument={selected} />
         <OrderForm accountId={DEFAULT_ACCOUNT_ID} instrument={selected} />
       </div>
-      <ChartPanel instrument={selected} />
+      <div className="space-y-6">
+        <ChartPanel instrument={selected} />
+        <CorporateActionsPanel
+          accountId={DEFAULT_ACCOUNT_ID}
+          instrument={selected}
+        />
+      </div>
     </div>
   );
 }

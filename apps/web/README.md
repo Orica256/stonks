@@ -13,17 +13,22 @@
 
 | ルート | 内容 |
 |---|---|
-| `/` | トレード（銘柄検索＋気配＋ローソク足チャート＋注文入力） |
+| `/` | トレード（銘柄検索＋気配＋ローソク足チャート＋注文入力＋選択銘柄の配当・分割一覧／口座反映） |
 | `/portfolio` | 総資産サマリ＋保有ポジション（評価額・含み損益）＋譲渡益課税（概算：通貨別の実現益/概算税率/概算税額。確定申告の正確計算ではなく投資助言でもない旨を併記） |
 | `/history` | 取引履歴（約定一覧） |
 | `/analysis` | 高度チャート（複数銘柄の正規化リターン比較・騰落率ヒートマップ・描画ツール） |
 | `/backtest` | バックテスト（戦略プリセット・期間・初期資金を指定し `POST /backtests` を実行、成績指標＋エクイティカーブを表示） |
-| `/agent` | AI エージェント成績（累積リターン/最大DD/シャープ/勝率・ベンチ比較）＋意思決定ログ（監査証跡） |
+| `/agent` | AI エージェント成績（累積リターン/最大DD/シャープ/勝率・ベンチ比較）＋意思決定ログ（監査証跡）。ベンチ比較は `comparisonResult`（成立/不成立を理由付きで表現）を正準に表示し、不成立時は推測リターンを出さず日本語の理由ラベル（未設定／価格データ不足／戦略エクイティ不足）を明示する |
 
 ## 構成
 
 - `src/lib/api/` — 型付き HTTP クライアント（`client.ts`）、エンドポイント（`endpoints.ts`）、TanStack Query フック（`hooks.ts`）、SSE 気配ストリーム（`quote-stream.ts`）。
-- `src/features/` — 機能別 UI（instruments / chart / order / analysis / backtest）。
+- `src/features/` — 機能別 UI（instruments / chart / order / analysis / backtest / agent）。
+- `src/features/instruments/corporate-actions-panel.tsx` — 選択銘柄の配当・分割一覧
+  （`GET /instruments/:id/corporate-actions`）。各イベントを口座へ反映（`POST /accounts/:id/corporate-actions`、
+  `useApplyCorporateAction`）。反映はシミュレーション上の処理（配当→現金、分割→保有数量）で実マネー移動はしない旨を併記。
+- `src/features/agent/benchmark-label.ts` — ベンチ比較不能理由（`BenchmarkUnavailableReason`）を
+  日本語ラベルへ変換する表示専用ヘルパ（推測リターンを出さない・spec §2.7 P1）。
 - `src/features/backtest/` — バックテスト画面。対象銘柄・期間・初期資金・戦略プリセットから
   contracts の `RunBacktestRequest` を組み立て `POST /backtests`（`useRunBacktest`）を実行する。
   戦略は数個のプリセット（SMA クロス等。`lib/strategy.ts`、`when` は backtest 評価器の対応構文のみ）に限定。

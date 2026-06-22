@@ -1,6 +1,7 @@
 "use client";
 
 import { useDecisions, usePerformance } from "@/lib/api/hooks";
+import { benchmarkUnavailableLabel } from "@/features/agent/benchmark-label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import {
@@ -57,20 +58,28 @@ export default function AgentPage(): JSX.Element {
                   value={formatPercent(performance.data.snapshot.winRate)}
                 />
               </dl>
-              {performance.data.comparison ? (
+              {performance.data.comparisonResult.available ? (
                 <p className="text-sm text-neutral-600">
-                  ベンチ（{performance.data.comparison.benchmark}）比 超過リターン:{" "}
+                  ベンチ（
+                  {performance.data.comparisonResult.comparison.benchmark}）比
+                  超過リターン:{" "}
                   <span
                     className={pnlColorClass(
-                      performance.data.comparison.excessReturn,
+                      performance.data.comparisonResult.comparison.excessReturn,
                     )}
                   >
-                    {formatPercent(performance.data.comparison.excessReturn)}
+                    {formatPercent(
+                      performance.data.comparisonResult.comparison.excessReturn,
+                    )}
                   </span>
                 </p>
               ) : (
                 <p className="text-sm text-neutral-400">
-                  ベンチマーク未設定のため比較は表示されません。
+                  ベンチ（{performance.data.comparisonResult.benchmark}）比較は
+                  表示できません:{" "}
+                  {benchmarkUnavailableLabel(
+                    performance.data.comparisonResult.reason,
+                  )}
                 </p>
               )}
             </div>
