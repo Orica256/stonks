@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { DecimalString, Id, Quantity, Timestamp } from "./common.js";
 import { MarginType } from "./margin.js";
+import { OrderActivation, OrderLinkType } from "./order-link.js";
 
 export const OrderSide = z.enum(["BUY", "SELL"]);
 export type OrderSide = z.infer<typeof OrderSide>;
@@ -40,6 +41,32 @@ export const Order = z.object({
    * 永続層は Prisma の `@default(CASH)` で必ず値を持つ。
    */
   marginType: MarginType.optional(),
+  /**
+   * 複合注文のグループ ID（OCO / bracket 子。任意。Phase 5）。
+   * 同一 `linkGroupId` の注文は 1 グループとして連動し、片方が約定したらエンジンが
+   * 残りを CANCELLED にする（OCO カスケード）。未設定（=従来の単発注文）は連動しない。
+   */
+  linkGroupId: Id.optional(),
+  /**
+   * 複合注文の種別（OCO / IFD。任意。Phase 5）。
+   * - OCO: `linkGroupId` で束ねた他方の約定で自身が取消される。
+   * - IFD: 親（`parentOrderId`）の約定で発効する子、または子を持つ親に付与。
+   * 未設定は単発注文。
+   */
+  linkType: OrderLinkType.optional(),
+  /**
+   * IFD/bracket の親注文 ID（任意。Phase 5）。
+   * これが約定すると、本注文（子）が `activation` WAITING→ACTIVE に発効する。
+   * 親注文自身は `parentOrderId` を持たない。
+   */
+  parentOrderId: Id.optional(),
+  /**
+   * 発効状態（任意。未指定/`ACTIVE` はエンジンの約定評価対象。Phase 5）。
+   * IFD 子は発注時 `WAITING`（親約定まで休眠）で、親約定でエンジンが `ACTIVE` に遷移。
+   * 単発の従来注文は未指定のままで ACTIVE 相当として扱われる（後方互換）。
+   * 永続層は Prisma `@default(ACTIVE)`。
+   */
+  activation: OrderActivation.optional(),
   status: OrderStatus.default("PENDING"),
   createdAt: Timestamp,
   updatedAt: Timestamp,

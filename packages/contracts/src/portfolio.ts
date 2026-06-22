@@ -18,6 +18,27 @@ import type { Trade } from "./trade.js";
 export const PositionSide = z.enum(["LONG", "SHORT"]);
 export type PositionSide = z.infer<typeof PositionSide>;
 
+/**
+ * 建玉の論理一意キー（spec §5.1 への補記。Phase 5）。
+ *
+ * Phase 3 までは `[accountId, instrumentId, side]` を一意キーにしていたため、同一
+ * (account, instrument, side) の **CASH 現物 LONG と MARGIN 信用 LONG を別行に持てなかった**。
+ * Phase 5 でこれを `[accountId, instrumentId, side, marginType]` へ拡張し、現物と信用の
+ * 同方向建玉を分離する（docs/contracts-backlog.md の未決事項を確定）。
+ *
+ * `Position.marginType` は型としては optional（既存コードが record を手組みする後方互換のため）
+ * だが、**一意キー要素としては実質必須**: 未指定は CASH を意味し、永続層は Prisma
+ * `@default(CASH)` で必ず値を持つ。すなわち一意性判定では `marginType ?? "CASH"` を用いる。
+ * apps/api の upsert キーは `accountId_instrumentId_side` → `accountId_instrumentId_side_marginType`
+ * へ変更が必要（後続 Wave。申し送り参照）。
+ */
+export const POSITION_UNIQUE_KEY = [
+  "accountId",
+  "instrumentId",
+  "side",
+  "marginType",
+] as const;
+
 export const Position = z.object({
   id: Id,
   accountId: Id,
@@ -30,6 +51,10 @@ export const Position = z.object({
   /**
    * 資金区分（任意。未指定は CASH=現物として扱う。Phase 3）。
    * 現物建玉は未設定のまま既存挙動を保つ（永続層は Prisma `@default(CASH)`）。
+   *
+   * **Phase 5: 建玉一意キーの要素**。`[accountId, instrumentId, side, marginType]` で一意
+   * （`POSITION_UNIQUE_KEY` 参照）。同一 (account, instrument, side) の CASH/MARGIN 建玉を
+   * 別行に分離する。一意性判定では未指定を CASH とみなす（`marginType ?? "CASH"`）。
    */
   marginType: MarginType.optional(),
   /**
