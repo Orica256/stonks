@@ -3,6 +3,7 @@ import {
   JOB,
   type BackfillBarsPayload,
   type FetchFxRatePayload,
+  type IngestIntradayBarsPayload,
   type PollQuotePayload,
 } from "./jobs.js";
 
@@ -17,6 +18,7 @@ export interface RepeatableJobSpec {
   data:
     | PollQuotePayload
     | FetchFxRatePayload
+    | IngestIntradayBarsPayload
     | (BackfillBarsPayload & { from: string; to: string });
   /** BullMQ repeat オプション（cron）。jobId は重複登録防止に使う。 */
   cron: string;
@@ -28,6 +30,7 @@ export interface RepeatableJobSpec {
  * 設定からスケジュール（cron）ジョブ一覧を構築する。
  *
  * - 銘柄ユニバースの各銘柄に対し最新気配ポーリングを登録。
+ * - 各銘柄 × 設定の分足足種に対し分足取込（ローリング）を登録。
  * - FX(USD/JPY) 取得を 1 件登録。
  * - 日足バックフィルは初回ブートストラップ向けに別途 enqueue するため、
  *   ここでは cron 登録しない（毎日の差分取込は PollQuote/別運用に委譲）。
@@ -42,6 +45,24 @@ export const buildSchedule = (cfg: WorkerConfig): RepeatableJobSpec[] => {
       cron: cfg.pollQuoteCron,
       jobId: `poll-quote:${instrumentId}`,
     });
+  }
+
+  // 分足 OHLCV 取込（1m/5m/15m/1h）。銘柄 × 足種ごとに repeatable で登録し、
+  // ハンドラが実行時刻から lookback 分のローリングウィンドウを取り込む。
+  for (const instrumentId of cfg.universe) {
+    for (const timeframe of cfg.intradayTimeframes) {
+      specs.push({
+        name: JOB.IngestIntradayBars,
+        data: {
+          instrumentId,
+          timeframe,
+          lookbackMinutes: cfg.intradayLookbackMinutes,
+          force: false,
+        },
+        cron: cfg.intradayBarsCron,
+        jobId: `ingest-intraday-bars:${instrumentId}:${timeframe}`,
+      });
+    }
   }
 
   specs.push({

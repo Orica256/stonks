@@ -10,6 +10,21 @@ describe("loadWorkerConfig", () => {
     expect(cfg.universe).toEqual([]);
     expect(cfg.backfillTimeframe).toBe("1d");
     expect(cfg.backfillDays).toBe(365);
+    expect(cfg.intradayBarsCron).toBe("*/5 * * * *");
+    expect(cfg.intradayTimeframes).toEqual(["1m"]);
+    expect(cfg.intradayLookbackMinutes).toBe(120);
+  });
+
+  it("分足設定を解釈し未知の足種は無視する", () => {
+    const cfg = loadWorkerConfig({
+      INGEST_INTRADAY_TIMEFRAMES: "1m, 1h, 1d, bogus, 5m",
+      INGEST_INTRADAY_LOOKBACK_MIN: "30",
+      INGEST_INTRADAY_BARS_CRON: "*/1 * * * *",
+    });
+    // 1d / bogus は IntradayTimeframe ではないため除外される
+    expect(cfg.intradayTimeframes).toEqual(["1m", "1h", "5m"]);
+    expect(cfg.intradayLookbackMinutes).toBe(30);
+    expect(cfg.intradayBarsCron).toBe("*/1 * * * *");
   });
 
   it("env を解釈する（universe はカンマ区切り・空白除去）", () => {

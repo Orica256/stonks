@@ -9,17 +9,45 @@ const baseCfg = (over: Partial<WorkerConfig> = {}): WorkerConfig => ({
 });
 
 describe("buildSchedule", () => {
-  it("ユニバース各銘柄の poll-quote と 1 件の FX を登録する", () => {
+  it("ユニバース各銘柄の poll-quote・分足取込・1 件の FX を登録する", () => {
     const specs = buildSchedule(baseCfg());
     const polls = specs.filter((s) => s.name === JOB.PollQuote);
+    const intraday = specs.filter((s) => s.name === JOB.IngestIntradayBars);
     const fx = specs.filter((s) => s.name === JOB.FetchFxRate);
     expect(polls).toHaveLength(2);
+    // 既定の分足足種は 1m のみ → 銘柄ごとに 1 件
+    expect(intraday).toHaveLength(2);
     expect(fx).toHaveLength(1);
     expect(polls.map((s) => s.jobId)).toEqual([
       "poll-quote:TSE:7203",
       "poll-quote:NASDAQ:AAPL",
     ]);
+    expect(intraday.map((s) => s.jobId)).toEqual([
+      "ingest-intraday-bars:TSE:7203:1m",
+      "ingest-intraday-bars:NASDAQ:AAPL:1m",
+    ]);
     expect(fx[0]?.jobId).toBe("fetch-fx-rate:USD-JPY");
+  });
+
+  it("複数足種を設定すると銘柄 × 足種で分足取込を登録する", () => {
+    const specs = buildSchedule(
+      baseCfg({ intradayTimeframes: ["1m", "5m", "1h"] }),
+    );
+    const intraday = specs.filter((s) => s.name === JOB.IngestIntradayBars);
+    // 2 銘柄 × 3 足種
+    expect(intraday).toHaveLength(6);
+    expect(intraday[0]?.cron).toBe(baseCfg().intradayBarsCron);
+    const sample = intraday.find(
+      (s) => s.jobId === "ingest-intraday-bars:TSE:7203:5m",
+    );
+    expect(sample?.data).toMatchObject({ timeframe: "5m", lookbackMinutes: 120 });
+  });
+
+  it("分足足種が空なら分足取込を登録しない", () => {
+    const specs = buildSchedule(baseCfg({ intradayTimeframes: [] }));
+    expect(specs.filter((s) => s.name === JOB.IngestIntradayBars)).toHaveLength(
+      0,
+    );
   });
 
   it("ユニバースが空なら FX のみ", () => {

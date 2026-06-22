@@ -2,12 +2,14 @@ import { DomainError } from "@stonks/contracts";
 import {
   BackfillBarsPayload,
   FetchFxRatePayload,
+  IngestIntradayBarsPayload,
   JOB,
   PollQuotePayload,
 } from "./jobs.js";
 import {
   handleBackfillBars,
   handleFetchFxRate,
+  handleIngestIntradayBars,
   handlePollQuote,
   type HandlerDeps,
 } from "./handlers.js";
@@ -31,6 +33,11 @@ export const dispatch = async (
   switch (job.name) {
     case JOB.BackfillBars:
       return handleBackfillBars(deps, BackfillBarsPayload.parse(job.data));
+    case JOB.IngestIntradayBars:
+      return handleIngestIntradayBars(
+        deps,
+        IngestIntradayBarsPayload.parse(job.data),
+      );
     case JOB.PollQuote:
       return handlePollQuote(deps, PollQuotePayload.parse(job.data));
     case JOB.FetchFxRate:

@@ -15,6 +15,11 @@ export const QUEUE_NAME = "ingestion";
 export const JOB = {
   /** 日足 OHLCV のバックフィル（期間指定でヒストリカルを埋める）。 */
   BackfillBars: "backfill-bars",
+  /**
+   * 分足 OHLCV の取込（1m/5m/15m/1h）。実行時刻を基準に直近 lookback 分を
+   * ローリングで取り込む。repeatable cron で定期実行される（spec §2.1 P1）。
+   */
+  IngestIntradayBars: "ingest-intraday-bars",
   /** 最新気配ポーリング（US 準リアルタイム / JP は EOD・遅延）。 */
   PollQuote: "poll-quote",
   /** 為替レート（USD/JPY）取得。 */
@@ -31,6 +36,27 @@ export const BackfillBarsPayload = z.object({
   to: Timestamp,
 });
 export type BackfillBarsPayload = z.infer<typeof BackfillBarsPayload>;
+
+/** 分足の足種（日足を除く intraday）。無料枠の取得可能粒度に揃える。 */
+export const IntradayTimeframe = z.enum(["1m", "5m", "15m", "1h"]);
+export type IntradayTimeframe = z.infer<typeof IntradayTimeframe>;
+
+/**
+ * 分足取込: 実行時刻から `lookbackMinutes` 遡った直近ウィンドウを
+ * `timeframe` で取り込み保存する。`from`/`to` を payload に固定せず
+ * ハンドラ実行時に算出するため、repeatable cron でローリング取込できる。
+ */
+export const IngestIntradayBarsPayload = z.object({
+  instrumentId: InstrumentId,
+  timeframe: IntradayTimeframe.default("1m"),
+  /** 直近何分を取り込むか（cron 間隔より十分に長くして取りこぼしを防ぐ）。 */
+  lookbackMinutes: z.number().int().positive().default(120),
+  /** 休場中も取得するか。既定 false（無料枠の呼び出しを節約）。 */
+  force: z.boolean().default(false),
+});
+export type IngestIntradayBarsPayload = z.infer<
+  typeof IngestIntradayBarsPayload
+>;
 
 /** 最新気配ポーリング: 1 銘柄の現在気配を取得し Quote として保存する。 */
 export const PollQuotePayload = z.object({
@@ -55,6 +81,7 @@ export type FetchFxRatePayload = z.infer<typeof FetchFxRatePayload>;
 /** ジョブ名 → ペイロードスキーマの対応表（ディスパッチ時のバリデーションに使う）。 */
 export const JOB_PAYLOADS = {
   [JOB.BackfillBars]: BackfillBarsPayload,
+  [JOB.IngestIntradayBars]: IngestIntradayBarsPayload,
   [JOB.PollQuote]: PollQuotePayload,
   [JOB.FetchFxRate]: FetchFxRatePayload,
 } as const;
