@@ -7,6 +7,7 @@ import { DEFAULT_CAPITAL_GAINS_TAX_RATE, DomainError } from "@stonks/contracts";
 import type {
   CapitalGainsTaxEstimate,
   CashLedgerEntry,
+  CorporateAction,
   CostBasisMethod,
   Currency,
   EquityPoint,
@@ -216,6 +217,114 @@ export class DefaultPortfolioService implements PortfolioService {
         estimatedTax: estimateCapitalGainsTaxAmount(realizedGains, taxRate),
       };
     });
+  }
+
+  /**
+   * コーポレートアクションを口座へ適用する（spec §2.1 P1 分割調整 / §2.3 P1 配当受取）。
+   *
+   * 当該口座の当該銘柄の **保有ポジションがある場合のみ** 作用する（未保有=数量 0 は no-op）。
+   * 評価時刻は `action.exDate`（UTC）を用い、現金台帳・エクイティ点はこの時刻で記録する。
+   *
+   * ### DIVIDEND（配当受取）
+   * - `配当額 = 保有数量 × action.value`（1 株あたり配当額, DecimalString, decimal.js で計算）。
+   * - 建玉通貨（`Position.currency`）建てで現金残高を増やし、`CashLedgerEntry(DIVIDEND)` を 1 件記録。
+   *   refId は `div:<instrumentId>:<exDate>`（同一アクションを冪等に追跡できる安定キー）。
+   * - **概算スコープ**: 源泉徴収・配当課税（所得税/住民税）・外国税額控除・端株処理は行わず、
+   *   **額面どおり**現金加算する簡略方針（CLAUDE.md §7 免責。投資助言ではない）。
+   * - ポジションの数量・平均取得単価・税ロットは変更しない（配当は現金イベント）。
+   *
+   * ### SPLIT（株式分割）
+   * - `action.value` を **分割比率** として解釈する（"2" = 1→2 株の 2 分割、"0.5" = 2→1 株の併合）。
+   * - `quantity` を `× 比率`、`avgCost`（平均取得単価）を `÷ 比率` に調整する。
+   *   よって建玉簿価（`quantity × avgCost`）は不変（数学的恒等。丸めは avgCost 側のみ）。
+   * - 数量は整数で表現するため `比率 × 数量` を四捨五入で丸め（端株は概算スコープ外。整数株前提）。
+   *   平均取得単価 `avgCost` は丸めず DecimalString のまま保持し簿価の不変性を最大限保つ。
+   * - 税ロットがあれば各ロットの `quantity` / `remainingQuantity` も `× 比率`（四捨五入）、
+   *   `costBasis` を `÷ 比率` に調整し、建玉とロットの整合（合計数量・簿価）を保つ。
+   * - 配当と異なり現金・実現損益は動かさない（建玉価値不変のコーポレートアクション）。
+   */
+  async applyCorporateAction(
+    accountId: string,
+    action: CorporateAction,
+  ): Promise<void> {
+    const position = await this.repo.getPosition(accountId, action.instrumentId);
+    // 未保有（数量 0）は配当・分割いずれも作用しない（spec §5.2 整合: 建玉が無ければ調整対象が無い）。
+    if (!position || new Decimal(position.quantity).lte(ZERO)) return;
+
+    const at = new Date(action.exDate);
+    if (action.type === "DIVIDEND") {
+      await this.applyDividend(position, action, at);
+    } else {
+      await this.applySplit(accountId, position, action);
+    }
+  }
+
+  /**
+   * 配当受取: 保有数量 × 1 株配当を建玉通貨で現金へ加算し CashLedger(DIVIDEND) を 1 件起こす。
+   * 額面受領（源泉/課税は概算スコープ外）。現金残高 = 台帳合計の不変条件は adjustCash が維持する。
+   */
+  private async applyDividend(
+    position: Position,
+    action: CorporateAction,
+    at: Date,
+  ): Promise<void> {
+    const perShare = new Decimal(action.value);
+    const amount = new Decimal(position.quantity).times(perShare);
+    if (amount.lte(ZERO)) return; // 配当 0（または負）は現金イベントを起こさない。
+    await this.adjustCash(
+      position.accountId,
+      M.money(amount, position.currency),
+      "DIVIDEND",
+      at,
+      `div:${action.instrumentId}:${action.exDate}`,
+    );
+  }
+
+  /**
+   * 株式分割: 比率（action.value）で建玉とロットを調整する。建玉簿価は不変。
+   * 数量は整数株前提のため四捨五入、平均取得単価/ロット原価は丸めず簿価不変性を保つ。
+   */
+  private async applySplit(
+    accountId: string,
+    position: Position,
+    action: CorporateAction,
+  ): Promise<void> {
+    const ratio = new Decimal(action.value);
+    if (ratio.lte(ZERO)) {
+      throw new DomainError(
+        "VALIDATION",
+        `split ratio must be > 0 (got ${action.value})`,
+      );
+    }
+
+    // 数量は ×比率（整数株前提で四捨五入）。平均取得単価は ÷比率（丸めず簿価不変を維持）。
+    const newQty = new Decimal(position.quantity)
+      .times(ratio)
+      .toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+    const newAvg = new Decimal(position.avgCost).dividedBy(ratio);
+    await this.repo.savePosition({
+      ...position,
+      quantity: newQty.toNumber(),
+      avgCost: newAvg.toString(),
+    });
+
+    // 税ロットも同比率で調整し、建玉合計とロット合計の整合（数量・簿価）を保つ。
+    const lots = await this.repo.listTaxLots(accountId, action.instrumentId);
+    for (const lot of lots) {
+      const lotQty = new Decimal(lot.quantity)
+        .times(ratio)
+        .toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+      const lotRemain = new Decimal(lot.remainingQuantity)
+        .times(ratio)
+        .toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
+      const lotCost = new Decimal(lot.costBasis).dividedBy(ratio);
+      await this.repo.saveTaxLot({
+        ...lot,
+        quantity: lotQty.toNumber(),
+        remainingQuantity: lotRemain.toNumber(),
+        costBasis: lotCost.toString(),
+      });
+    }
   }
 
   async applyTrade(trade: Trade): Promise<void> {

@@ -40,6 +40,8 @@ describe("PortfolioService 契約遵守", () => {
     expect(typeof svc.getRealizedPnl).toBe("function");
     // Phase 3: 譲渡益課税の概算（optional IF を実装に格上げ）。
     expect(typeof svc.estimateCapitalGainsTax).toBe("function");
+    // Phase 4: コーポレートアクション適用（配当受取 / 分割調整。optional IF を実装に格上げ）。
+    expect(typeof svc.applyCorporateAction).toBe("function");
   });
 
   it("出力は PositionView / PortfolioSummary / EquityPoint スキーマに通る", async () => {
