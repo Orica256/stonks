@@ -1,6 +1,15 @@
-import { IndicatorResult, type PriceBar } from "@stonks/contracts";
+import {
+  IndicatorResult,
+  type IndicatorService,
+  type PriceBar,
+} from "@stonks/contracts";
 import { describe, expect, it } from "vitest";
 import { indicatorService } from "./service.js";
+
+// 契約 IF 適合の型レベル固定: indicatorService が spec §6.4 の IndicatorService
+// として代入可能であること（公開 IF の形が契約と一致することを型で保証する）。
+const _conformsToContract: IndicatorService = indicatorService;
+void _conformsToContract;
 
 /** テスト用 PriceBar 列を生成（close は Decimal 文字列、ts は UTC ISO8601）。 */
 function makeBars(closes: number[]): PriceBar[] {

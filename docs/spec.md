@@ -327,6 +327,7 @@ interface MarketDataProvider {
   searchInstruments(q: string, market?: Market): Promise<Instrument[]>;
   getQuote(instrumentId: string): Promise<Quote>;
   getBars(req: { instrumentId; timeframe; from; to }): Promise<PriceBar[]>;
+  getCorporateActions?(req: { instrumentId; from; to }): Promise<CorporateAction[]>; // 配当/分割（P1。optional）
   // 任意: streamQuotes(ids): AsyncIterable<Quote>
 }
 interface PriceProvider {                 // 他モジュールが価格を得る最小 IF
@@ -357,6 +358,13 @@ interface PortfolioService {
   getPositions(accountId): Promise<PositionView[]>; // 評価額・含み損益込み
   getSummary(accountId): Promise<PortfolioSummary>; // 総資産・実現/含み損益
   getHistory(accountId, range): Promise<EquityPoint[]>;
+  deposit(accountId, amount, at?): Promise<void>;   // 入金（CashLedger DEPOSIT 整合。B4）
+  withdraw(accountId, amount, at?): Promise<void>;  // 出金（残高不足は拒否。B4）
+  getTrades(accountId): Promise<Trade[]>;           // 取引履歴一覧（B2）
+  getRealizedPnl(accountId): Promise<RealizedPnl[]>;// 実現損益（trade 単位。B2）
+  getTaxLots?(accountId, openOnly?): Promise<TaxLot[]>;                 // 税ロット（P2。optional）
+  estimateCapitalGainsTax?(accountId, range): Promise<CapitalGainsTaxEstimate[]>; // 譲渡益課税概算（P1。optional）
+  applyCorporateAction?(accountId, action): Promise<void>;             // 配当受取/分割調整（P1。optional）
 }
 ```
 入力: Trade / 評価用価格 → 出力: ポジション・損益ビュー。
@@ -395,7 +403,8 @@ interface RiskGuard {                                   // 暴走防止
 }
 interface PerformanceEvaluator {
   snapshot(accountId: string, at: Date): Promise<PerformanceSnapshot>;
-  compare(accountId: string, benchmark: BenchmarkId, range): Promise<BenchmarkComparison>;
+  compare(accountId: string, benchmark: BenchmarkId, range): Promise<BenchmarkComparison>; // 不成立は throw
+  compareResult(accountId, benchmark, range): Promise<BenchmarkComparisonResult>; // 成立/不成立(理由付き)を返す
 }
 ```
 入力: AI の意思決定/観測要求 → 出力: 監査ログ＋発注（TradingEngine 委譲）、成績指標。
