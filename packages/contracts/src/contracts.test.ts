@@ -7,6 +7,8 @@ import {
   InstrumentId,
   buildInstrumentId,
   parseInstrumentId,
+  GetCorporateActionsRequest,
+  BenchmarkComparisonResult,
 } from "./index.js";
 
 describe("Money schema", () => {
@@ -95,6 +97,59 @@ describe("InstrumentId canonical form (B1)", () => {
     });
     expect(parseInstrumentId("nonsense")).toBeNull();
     expect(parseInstrumentId("LSE:VOD")).toBeNull();
+  });
+});
+
+describe("GetCorporateActionsRequest schema (B12)", () => {
+  it("accepts a valid request, rejects missing instrumentId", () => {
+    expect(
+      GetCorporateActionsRequest.safeParse({
+        instrumentId: "TSE:7203",
+        from: "2026-01-01T00:00:00Z",
+        to: "2026-06-01T00:00:00Z",
+      }).success,
+    ).toBe(true);
+    expect(
+      GetCorporateActionsRequest.safeParse({
+        from: "2026-01-01T00:00:00Z",
+        to: "2026-06-01T00:00:00Z",
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("BenchmarkComparisonResult schema (benchmark unavailable reason)", () => {
+  it("accepts the available case with a comparison", () => {
+    const r = BenchmarkComparisonResult.safeParse({
+      available: true,
+      comparison: {
+        accountId: "a1",
+        benchmark: "BUY_AND_HOLD",
+        range: { from: "2026-01-01T00:00:00Z", to: "2026-06-01T00:00:00Z" },
+        strategyReturn: 0.1,
+        benchmarkReturn: 0.05,
+        excessReturn: 0.05,
+      },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts the unavailable case with a typed reason", () => {
+    const r = BenchmarkComparisonResult.safeParse({
+      available: false,
+      benchmark: "SP500",
+      reason: "NOT_CONFIGURED",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects an unknown reason", () => {
+    const r = BenchmarkComparisonResult.safeParse({
+      available: false,
+      benchmark: "SP500",
+      reason: "WHATEVER",
+    });
+    expect(r.success).toBe(false);
   });
 });
 
