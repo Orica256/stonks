@@ -1,7 +1,9 @@
 import Decimal from "decimal.js";
 import type {
   BenchmarkComparison,
+  BenchmarkComparisonResult,
   BenchmarkId,
+  BenchmarkUnavailableReason,
   PerformanceEvaluator as IPerformanceEvaluator,
   PerformanceSnapshot,
   PortfolioService,
@@ -29,15 +31,6 @@ export interface PerformanceEvaluatorDeps {
 }
 
 const ZERO = new Decimal(0);
-
-/** ベンチ比較を公正に行えない理由（推測リターンを出さず明示する）。 */
-export type BenchmarkUnavailableReason =
-  /** 当該ベンチの instrumentId が設定されていない。 */
-  | "NOT_CONFIGURED"
-  /** ベンチ銘柄の基準点の価格が取得できない（データ欠落）。 */
-  | "PRICE_DATA_MISSING"
-  /** 戦略側のエクイティ点が range 内に不足し、同条件比較ができない。 */
-  | "NO_STRATEGY_EQUITY";
 
 /**
  * ベンチ比較が公正に成立しないときに投げる型付きエラー（spec §2.7 P1 / §9）。
@@ -200,6 +193,34 @@ export class DefaultPerformanceEvaluator implements IPerformanceEvaluator {
         .minus(benchmarkReturn)
         .toNumber(),
     };
+  }
+
+  /**
+   * {@link compare} のラッパ。比較が公正に成立しないときに
+   * {@link BenchmarkUnavailableError} を投げる代わりに、理由付きの
+   * {@link BenchmarkComparisonResult}（discriminated union）を返す。
+   *
+   * - 成立: `{ available: true, comparison }`。
+   * - 不成立: `{ available: false, benchmark, reason }`（値を捏造しない）。
+   *
+   * api はこれを使えば throw を握り潰さず、比較不能の理由を型付きで
+   * クライアントへ提示できる（spec §2.7 P1 ベンチ比較 / §9 公正性）。
+   * `BenchmarkUnavailableError` 以外の例外（インフラ障害等）は捕捉せず再送出する。
+   */
+  async compareResult(
+    accountId: string,
+    benchmark: BenchmarkId,
+    range: { from: Date; to: Date },
+  ): Promise<BenchmarkComparisonResult> {
+    try {
+      const comparison = await this.compare(accountId, benchmark, range);
+      return { available: true, comparison };
+    } catch (err) {
+      if (err instanceof BenchmarkUnavailableError) {
+        return { available: false, benchmark: err.benchmark, reason: err.reason };
+      }
+      throw err;
+    }
   }
 
   /**

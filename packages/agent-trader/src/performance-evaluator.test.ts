@@ -365,3 +365,103 @@ describe("PerformanceEvaluator.compare", () => {
     expect(cmp.benchmarkReturn).toBeCloseTo(0.2, 10);
   });
 });
+
+describe("PerformanceEvaluator.compareResult", () => {
+  const range = {
+    from: new Date("2026-01-01T00:00:00Z"),
+    to: new Date("2026-01-31T00:00:00Z"),
+  };
+
+  it("成立時は { available: true, comparison } を返す", async () => {
+    const portfolio = new FakePortfolioService({
+      summary: summary("130"),
+      history: points([100, 130]),
+    });
+    const evaluator = new DefaultPerformanceEvaluator({
+      portfolio,
+      priceProvider: new FakePriceProvider(
+        {},
+        {
+          "2026-01-01T00:00:00.000Z": {
+            "bench-1": { amount: "1000", currency: "JPY" },
+          },
+          "2026-01-02T00:00:00.000Z": {
+            "bench-1": { amount: "1100", currency: "JPY" },
+          },
+        },
+      ),
+      benchmark: { buyAndHoldInstrumentId: "bench-1" },
+    });
+    const result = await evaluator.compareResult("acc", "BUY_AND_HOLD", {
+      from: new Date("2026-01-01T00:00:00Z"),
+      to: new Date("2026-01-02T00:00:00Z"),
+    });
+    expect(result.available).toBe(true);
+    if (result.available) {
+      expect(result.comparison.benchmark).toBe("BUY_AND_HOLD");
+      expect(result.comparison.strategyReturn).toBeCloseTo(0.3, 10);
+      expect(result.comparison.benchmarkReturn).toBeCloseTo(0.1, 10);
+      expect(result.comparison.excessReturn).toBeCloseTo(0.2, 10);
+    }
+  });
+
+  it("NOT_CONFIGURED を { available: false, benchmark, reason } で返す（throw しない）", async () => {
+    const portfolio = new FakePortfolioService({
+      summary: summary("100"),
+      history: points([100, 110]),
+    });
+    const evaluator = new DefaultPerformanceEvaluator({
+      portfolio,
+      priceProvider: new FakePriceProvider({}),
+    });
+    const result = await evaluator.compareResult("acc", "TOPIX", range);
+    expect(result).toEqual({
+      available: false,
+      benchmark: "TOPIX",
+      reason: "NOT_CONFIGURED",
+    });
+  });
+
+  it("PRICE_DATA_MISSING を { available: false, reason } で返す", async () => {
+    const portfolio = new FakePortfolioService({
+      summary: summary("130"),
+      history: points([100, 130]),
+    });
+    const evaluator = new DefaultPerformanceEvaluator({
+      portfolio,
+      // ベンチ銘柄の at 価格が未提供 → getLatestPrice が throw。
+      priceProvider: new FakePriceProvider({}),
+      benchmark: { buyAndHoldInstrumentId: "bench-1" },
+    });
+    const result = await evaluator.compareResult("acc", "BUY_AND_HOLD", range);
+    expect(result.available).toBe(false);
+    if (!result.available) {
+      expect(result.reason).toBe("PRICE_DATA_MISSING");
+      expect(result.benchmark).toBe("BUY_AND_HOLD");
+    }
+  });
+
+  it("NO_STRATEGY_EQUITY を { available: false, reason } で返す（0 を捏造しない）", async () => {
+    const portfolio = new FakePortfolioService({
+      summary: summary("100"),
+      history: points([100]), // 1 点のみ → 期間リターンを測れない。
+    });
+    const evaluator = new DefaultPerformanceEvaluator({
+      portfolio,
+      priceProvider: new FakePriceProvider(
+        {},
+        {
+          "2026-01-01T00:00:00.000Z": {
+            "bench-1": { amount: "1000", currency: "JPY" },
+          },
+        },
+      ),
+      benchmark: { buyAndHoldInstrumentId: "bench-1" },
+    });
+    const result = await evaluator.compareResult("acc", "BUY_AND_HOLD", range);
+    expect(result.available).toBe(false);
+    if (!result.available) {
+      expect(result.reason).toBe("NO_STRATEGY_EQUITY");
+    }
+  });
+});

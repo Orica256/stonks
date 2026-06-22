@@ -25,7 +25,6 @@ export {
 } from "./performance-evaluator.js";
 export type {
   BenchmarkConfig,
-  BenchmarkUnavailableReason,
   PerformanceEvaluatorDeps,
 } from "./performance-evaluator.js";
 
