@@ -21,14 +21,15 @@
 | Phase 1 | ✅ 完了 | `@stonks/analytics`(指標), `@stonks/trading-engine`(注文/約定/手数料/**信用取引**), `@stonks/portfolio`(保有/損益/**税ロット/譲渡益課税概算**), `@stonks/market-data`(Finnhub/Yahoo/J-Quants/FX + フォールバック) |
 | Phase 2 | ✅ 完了 | `apps/api`(NestJS 全モジュール DI 結線・REST/SSE・agent/成績/backtest/税エンドポイント), `packages/agent-trader`(AI 売買・リスクガード・成績評価・**ベンチ比較**), `apps/mcp-server`(MCP 手動売買), `apps/ingestion-worker`(BullMQ 取込), `apps/web`(Next.js UI) |
 | Phase 3 | ✅ 一部拡充 | `@stonks/backtest`(BacktestRunner・API・**web 画面**), `apps/agent-runner`(自律ループ・**実 LLM 判断**), 信用取引, 税ロット, 高度チャート(複数銘柄比較/ヒートマップ/描画ツール), **譲渡益課税概算(P1)** |
+| Phase 4 | ✅ 一部拡充 | **配当/分割**(market-data `getCorporateActions`・portfolio 配当受取/分割調整・api 2エンドポイント・web パネル), **分足 OHLCV 取込**(1m/5m/15m/1h, ingestion-worker), **ベンチ比較不能の理由提示**(`compareResult`→`/performance` `comparisonResult`→web ラベル), **整合性チェック強化**(メソッド単位 IF 突合＋契約テスト網羅) |
 
 ### 検証状態（最重要）
 
-**`pnpm verify` が完全 green**（最終確認 2026-06-22, main）。これは下記を一括実行する品質ゲート:
+**`pnpm verify` が完全 green**（最終確認 2026-06-23, main）。これは下記を一括実行する品質ゲート:
 `generate`(Prisma) → `typecheck`(全パッケージ) → `lint`(全パッケージ) → `test`(全テスト) → `check:consistency`(spec↔実装/モジュール間 IF の横断整合性)。
 
-- テスト **341 件 green**（contracts26/core11/analytics22/web65/trading35/agent-trader34/portfolio24/market34/ingestion22/backtest4/api18/mcp17/agent-runner29）。
-- 整合性チェック **ERROR 0 / WARNING 6**（WARN は「spec §6.8 の代表エンドポイント一覧に未記載の実装ルート」等の情報通知のみ。ゲートは green）。
+- テスト **384 件 green**（contracts30/core11/analytics22/web76/trading35/agent-trader38/portfolio33/market40/ingestion29/backtest4/api20/mcp17/agent-runner29）。
+- 整合性チェック **ERROR 0 / WARNING 8**（5観点 A〜E。WARN は「spec §6.8 の代表一覧に未記載の実装ルート」等の情報通知のみ。ゲートは green）。観点 C は**メソッド単位**で spec §6 IF↔contracts を突合、E は各 IF の契約遵守テスト網羅を検査。
 - **再開時はまず別PCで `pnpm install && pnpm verify` を流して green を確認すること。**
 
 ### ブランチ構成（現状・すべて origin に push 済み）
@@ -39,17 +40,22 @@
 
 ### 次にやること（残作業・優先順）
 
-1. **残り P1**: 配当受取（CorporateAction DIVIDEND）・分足 OHLCV（1m/5m/15m/1h 取込）・配当/分割の調整（市場データ＋portfolio）。
-2. **api 成績の理由提示**: agent-trader の `BenchmarkUnavailableError.reason`（NOT_CONFIGURED/PRICE_DATA_MISSING 等）を `/performance` レスポンスへ反映し web で表示（現状は `comparison: null` のまま）。
-3. **譲渡益課税の発展**: 概算税の `CashLedger(TAX)` 現金反映タイミング、口座別非課税(NISA)の自動判定、`estimateCapitalGainsTax` optional→必須 IF 昇格（domain-architect 調整）。
-4. **契約が要る Phase 3 残**: 信用の複合注文（OCO/IFD）、CASH/MARGIN 同一建玉の分離（Position 一意キー, api 要調整）。いずれも `domain-architect` 経由で契約先行。
-5. backtest UI の複数銘柄ユニバース対応、E2E（Playwright）拡充。
+> Phase 4 で「配当受取・分割調整／分足取込／ベンチ理由提示」は完了。以下が残り。
+
+1. **P1 の残り**: 配当の源泉徴収・税扱い（現状は額面で現金反映）、**分割の OHLCV 側調整**（調整済み終値 vs 生株価。market-data）、**分足の web チャート時間足切替**（取込済みだが UI 導線が未整備）。
+2. **譲渡益課税の発展**: 概算税の `CashLedger(TAX)` 現金反映タイミング、口座別非課税(NISA)の自動判定、`estimateCapitalGainsTax`/`applyCorporateAction`/`getCorporateActions` の optional→必須 IF 昇格（domain-architect 調整）。
+3. **契約が要る Phase 3 残**: 信用の複合注文（OCO/IFD）、CASH/MARGIN 同一建玉の分離（Position 一意キー, api 要調整）。いずれも `domain-architect` 経由で契約先行。
+4. **品質**: E2E（Playwright）は**未導入**（spec §3/§7 想定）。主要フロー（発注→約定→ポートフォリオ反映・配当/分割適用・成績表示）の E2E。backtest UI の複数銘柄ユニバース対応（契約 `StrategyDef.universe` は配列対応済み）。
+5. **契約バックログ中〜低（`docs/contracts-backlog.md` B5–B11）**: 成行買い予算上限(B5)・FillModel ステートフル化(B6)・手数料 Money 統一(B7)・RiskGuard.check シグネチャ(B8)・成績基準点(B9)・IndicatorSpec.params union 化(B11)。※B10 は対応済み。
 
 ### 主要な実装上の申し送り（詳細は `docs/contracts-backlog.md`）
 
 - **譲渡益課税は「概算」**: 実現益×概算率（既定 `DEFAULT_CAPITAL_GAINS_TAX_RATE="0.20315"`=20.315%, 設定で差し替え可）。益のみ課税・損益通算なし・確定申告の正確計算はスコープ外（CLAUDE.md §7 免責）。spec §10 に方針追記を提案済み。
 - **自律ループの実 LLM**: `apps/agent-runner` の `provider=llm` ＋ env `ANTHROPIC_API_KEY` 設定時のみ Claude(`claude-opus-4-8`)で判断。既定は無LLMの HOLD で**課金ゼロ**。LLM 利用料はインフラ費と別枠（spec §2.7）。
 - **信用取引/税ロット**: contracts に margin/tax-lot 契約あり。trading-engine が信用約定・保証金・金利、portfolio が税ロット(FIFO/LIFO/AVERAGE/SPECIFIC)を実装済み。
+- **配当/分割（Phase 4）**: market-data `getCorporateActions`（Yahoo=配当/分割, J-Quants=AdjustmentFactor から分割。無料枠・フォールバック）。portfolio `applyCorporateAction`（配当=`qty×value` を CashLedger(DIVIDEND) で**額面**現金反映、源泉徴収はスコープ外／分割=数量×比率・avgCost÷比率で簿価不変・税ロット連動）。api `GET/POST /…/corporate-actions`、web トレード画面にパネル。
+- **ベンチ比較の理由提示（Phase 4）**: `PerformanceEvaluator.compareResult` が throw せず `BenchmarkComparisonResult`（available/reason）を返す。api `/performance` は `comparisonResult` を追加（`comparison` は後方互換で nullable 維持）、web は理由ラベルを表示（推測リターンを出さない＝公正性 §9）。
+- **整合性チェック（強化済み）**: `scripts/check-consistency.mjs` は spec↔実装/モジュール間 IF を5観点で検証（A:client↔api, B:spec§6.8↔api, C:**メソッド単位**の spec§6 IF↔contracts, D:依存方向, E:IF↔契約テスト）。`docs/consistency-check.md` 参照。
 
 ---
 

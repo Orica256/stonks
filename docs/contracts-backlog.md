@@ -174,8 +174,9 @@
 
 ## 優先度低（任意・型の締め付け）
 
-### B10. `IndicatorResult.ts` の型
+### B10. `IndicatorResult.ts` の型 ✅ 対応済み
 - `z.array(z.string())` で任意文字列。入力 `PriceBar.ts` は `Timestamp` なので `ts: z.array(Timestamp)` に締めても良い（任意）。
+- → 対応済み: `IndicatorResult.ts` を `z.array(Timestamp)`（UTC ISO8601）へ締めた。出力 ts は入力 `PriceBar.ts` 由来でランタイム挙動の変化なし（contracts 30 / analytics 22 テスト green）。
 
 ### B11. `IndicatorSpec.params` の discriminated union 化
 - 現在 `z.record(z.number())` で MACD の fast/slow/signal も同居。kind 別 union 化で型安全性が上がる（現契約でも実装可）。
