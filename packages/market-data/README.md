@@ -7,7 +7,7 @@
 
 ## 提供する契約（contracts）
 
-- `MarketDataProvider` — `searchInstruments` / `getQuote` / `getBars`
+- `MarketDataProvider` — `searchInstruments` / `getQuote` / `getBars` / `getCorporateActions`
 - `PriceProvider` — `getLatestPrice(instrumentId, at?)`（他モジュールが価格を得る最小 IF）
 - `FxProvider` — `getRate("USD", "JPY", at?)`
 
@@ -19,8 +19,8 @@
 | アダプタ | 対象 | キー | 役割 / 無料枠の注意 |
 |---|---|---|---|
 | `FinnhubAdapter` | US | `FINNHUB_API_KEY` | 準リアルタイム気配。無料枠 60 req/min。JP は対象外（`supports` で false） |
-| `JQuantsAdapter` | JP | `JQUANTS_REFRESH_TOKEN` | 権威データ・**EOD（日足）のみ**・配信遅延あり。refreshToken→idToken をキャッシュ |
-| `YahooAdapter` | 日米 | 不要 | 履歴・JP 価格・**最終フォールバック**。非公式 API のため自主規制で軽くスロットル |
+| `JQuantsAdapter` | JP | `JQUANTS_REFRESH_TOKEN` | 権威データ・**EOD（日足）のみ**・配信遅延あり。refreshToken→idToken をキャッシュ。分割は `daily_quotes` の `AdjustmentFactor` から `getCorporateActions`（SPLIT）を導出 |
+| `YahooAdapter` | 日米 | 不要 | 履歴・JP 価格・**最終フォールバック**。非公式 API のため自主規制で軽くスロットル。`getCorporateActions`（DIVIDEND/SPLIT）を `events=div\|split` で取得 |
 | `ExchangeRateAdapter` | FX | 不要（`FX_API_BASE` で base 上書き可） | USD/JPY。最新値を TTL キャッシュ |
 
 フォールバック優先順（`createMarketDataProvider`）: **Finnhub → J-Quants → Yahoo**。
@@ -48,7 +48,28 @@ const bars = await md.getBars({
 });
 const price = await md.getLatestPrice("NASDAQ:AAPL"); // Money
 const fx = await md.getRate("USD", "JPY");            // FxRate
+const actions = await md.getCorporateActions({       // CorporateAction[]
+  instrumentId: "NASDAQ:AAPL",
+  from: "2024-01-01T00:00:00.000Z",
+  to: "2024-12-31T00:00:00.000Z",
+}); // exDate が [from,to] のものを返す（DIVIDEND/SPLIT）
 ```
+
+### 配当/分割（`getCorporateActions`、spec §2.1 P1 / §6.1）
+
+`exDate` が `[from, to]`（UTC）に入る `CorporateAction` を返す。getBars と同じ
+フォールバックチェーンに乗り、`getCorporateActions` を実装するアダプタのみが候補となる
+（**J-Quants 優先 → Yahoo フォールバック**）。レジストリは取得結果の `exDate` を
+`from`〜`to` で再フィルタしてから返す。
+
+- **J-Quants（JP 権威・無料枠）**: `daily_quotes` の `AdjustmentFactor`（係数 `!= 1` の日が
+  分割の権利落ち日。比率 = `1 / AdjustmentFactor`）から **SPLIT** を導出する。配当は無料枠の
+  対象外（`/fins/dividend` は上位プラン）のため J-Quants では返さず Yahoo にフォールバックする。
+- **Yahoo（キー不要・日米）**: chart の `events=div|split` から **DIVIDEND**（配当額）と
+  **SPLIT**（`numerator/denominator` または `splitRatio` "n:m" → 新株/旧株比率）を取得する。
+
+分割比率は `new shares / old shares`（例 4:1 フォワード=`"4"`、1:10 併合=`"0.1"`）。
+比率算出は float 除算を経由せず Decimal 上で計算し DecimalString に正規化する。
 
 個別アダプタやインフラ部品（`RateLimiter` / `TtlCache`）も export しており、
 ingestion-worker からの取込・バックフィルで再利用できる。
@@ -82,5 +103,7 @@ corepack pnpm@9.12.0 --filter @stonks/market-data lint
 
 - 永続化（OHLCV → TimescaleDB hypertable）と取込ジョブのスケジューリングは
   `apps/ingestion-worker`（BullMQ）の責務。本パッケージは取得・正規化に集中する。
-- 分割/配当調整（`CorporateAction`）は contracts に型があるが取得は未実装（Phase 1 で追補）。
+- 分割/配当（`CorporateAction`）の取得は `getCorporateActions` で実装済み（J-Quants=SPLIT /
+  Yahoo=DIVIDEND+SPLIT、いずれも無料枠）。配当の JP 権威データ（`/fins/dividend`）は上位プランの
+  ため取り込まず、当面 Yahoo にフォールバックする。
 - `streamQuotes`（任意 IF）は無料枠の都合により未実装。

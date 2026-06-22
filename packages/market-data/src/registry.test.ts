@@ -147,6 +147,62 @@ describe("MarketDataRegistry fallback chain", () => {
     expect(price).toEqual({ amount: "1.5", currency: "USD" });
   });
 
+  it("getCorporateActions falls back and filters by exDate window", async () => {
+    const failing: ProviderAdapter = {
+      name: "jq",
+      supports: () => true,
+      getCorporateActions: vi
+        .fn()
+        .mockRejectedValue(new DomainError("PROVIDER_UNAVAILABLE", "down")),
+    };
+    const working: ProviderAdapter = {
+      name: "yahoo",
+      supports: () => true,
+      getCorporateActions: vi.fn().mockResolvedValue([
+        // 期間内
+        {
+          instrumentId: "NASDAQ:AAPL",
+          type: "DIVIDEND",
+          exDate: "2024-02-09T00:00:00.000Z",
+          value: "0.24",
+        },
+        // 期間外（to より後）→ レジストリが落とす
+        {
+          instrumentId: "NASDAQ:AAPL",
+          type: "DIVIDEND",
+          exDate: "2024-05-09T00:00:00.000Z",
+          value: "0.25",
+        },
+      ]),
+    };
+    const reg = new MarketDataRegistry({ adapters: [failing, working] });
+    const actions = await reg.getCorporateActions({
+      instrumentId: "NASDAQ:AAPL",
+      from: "2024-01-01T00:00:00.000Z",
+      to: "2024-03-01T00:00:00.000Z",
+    });
+    expect(actions).toHaveLength(1);
+    expect(actions[0]!.exDate).toBe("2024-02-09T00:00:00.000Z");
+    expect(failing.getCorporateActions).toHaveBeenCalledOnce();
+    expect(working.getCorporateActions).toHaveBeenCalledOnce();
+  });
+
+  it("getCorporateActions throws PROVIDER_UNAVAILABLE when no adapter implements it", async () => {
+    const noCa: ProviderAdapter = {
+      name: "a",
+      supports: () => true,
+      getQuote: vi.fn(),
+    };
+    const reg = new MarketDataRegistry({ adapters: [noCa] });
+    await expect(
+      reg.getCorporateActions({
+        instrumentId: "NASDAQ:AAPL",
+        from: "2024-01-01T00:00:00.000Z",
+        to: "2024-03-01T00:00:00.000Z",
+      }),
+    ).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
+  });
+
   it("delegates FX to the configured fx adapter", async () => {
     const fx: FxAdapter = {
       name: "fx",

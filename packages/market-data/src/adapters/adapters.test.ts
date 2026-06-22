@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { Instrument, PriceBar, Quote, FxRate } from "@stonks/contracts";
+import {
+  CorporateAction,
+  Instrument,
+  PriceBar,
+  Quote,
+  FxRate,
+} from "@stonks/contracts";
 import { DomainError } from "@stonks/contracts";
 import { mockFetch, singleFetch } from "../test-helpers.js";
 import { YahooAdapter } from "./yahoo.js";
@@ -80,6 +86,85 @@ describe("YahooAdapter normalization", () => {
     expect(Instrument.parse(us[0])).toEqual(us[0]);
     expect(us[0]!.id).toBe("NASDAQ:AAPL");
     expect(us[0]!.currency).toBe("USD");
+  });
+
+  it("normalizes dividend and split corporate actions", async () => {
+    const { fn, calls } = singleFetch({
+      json: {
+        chart: {
+          result: [
+            {
+              events: {
+                dividends: {
+                  "1700000000": { amount: 0.24, date: 1_700_000_000 },
+                },
+                splits: {
+                  "1690000000": {
+                    numerator: 4,
+                    denominator: 1,
+                    splitRatio: "4:1",
+                    date: 1_690_000_000,
+                  },
+                },
+              },
+            },
+          ],
+        },
+      },
+    });
+    const yahoo = new YahooAdapter({ fetchFn: fn });
+    const actions = await yahoo.getCorporateActions({
+      instrumentId: "NASDAQ:AAPL",
+      from: "2023-07-01T00:00:00.000Z",
+      to: "2023-12-01T00:00:00.000Z",
+    });
+    expect(actions).toHaveLength(2);
+    for (const a of actions) expect(CorporateAction.parse(a)).toEqual(a);
+    // ex-date 昇順（split が dividend より前）。
+    const split = actions[0]!;
+    const div = actions[1]!;
+    expect(split.type).toBe("SPLIT");
+    expect(split.value).toBe("4");
+    expect(div.type).toBe("DIVIDEND");
+    expect(div.value).toBe("0.24");
+    expect(calls[0]).toContain("events=div");
+  });
+
+  it("returns an empty array when there are no events", async () => {
+    const { fn } = singleFetch({ json: { chart: { result: [{}] } } });
+    const yahoo = new YahooAdapter({ fetchFn: fn });
+    const actions = await yahoo.getCorporateActions({
+      instrumentId: "NASDAQ:AAPL",
+      from: "2023-01-01T00:00:00.000Z",
+      to: "2023-12-01T00:00:00.000Z",
+    });
+    expect(actions).toEqual([]);
+  });
+
+  it("derives a reverse split ratio from splitRatio when numerator is absent", async () => {
+    const { fn } = singleFetch({
+      json: {
+        chart: {
+          result: [
+            {
+              events: {
+                splits: {
+                  "1690000000": { splitRatio: "1:10", date: 1_690_000_000 },
+                },
+              },
+            },
+          ],
+        },
+      },
+    });
+    const yahoo = new YahooAdapter({ fetchFn: fn });
+    const actions = await yahoo.getCorporateActions({
+      instrumentId: "NASDAQ:AAPL",
+      from: "2023-01-01T00:00:00.000Z",
+      to: "2023-12-01T00:00:00.000Z",
+    });
+    expect(actions).toHaveLength(1);
+    expect(actions[0]!.value).toBe("0.1"); // 1:10 併合
   });
 });
 
@@ -198,6 +283,39 @@ describe("JQuantsAdapter", () => {
     const jq = new JQuantsAdapter({ refreshToken: "RT" });
     expect(jq.supports("TSE:7203")).toBe(true);
     expect(jq.supports("NASDAQ:AAPL")).toBe(false);
+  });
+
+  it("derives SPLIT corporate actions from AdjustmentFactor", async () => {
+    const { fn } = mockFetch([
+      {
+        match: (u) => u.includes("token/auth_refresh"),
+        respond: { json: { idToken: "ID-TOKEN" } },
+      },
+      {
+        match: (u) => u.includes("prices/daily_quotes"),
+        respond: {
+          json: {
+            daily_quotes: [
+              { Date: "2024-01-04", Close: 2530, AdjustmentFactor: 1 },
+              // 2:1 分割の権利落ち（係数 0.5 → 比率 2）。
+              { Date: "2024-01-10", Close: 1270, AdjustmentFactor: 0.5 },
+              { Date: "2024-01-11", Close: 1280, AdjustmentFactor: 1 },
+            ],
+          },
+        },
+      },
+    ]);
+    const jq = new JQuantsAdapter({ refreshToken: "RT", fetchFn: fn });
+    const actions = await jq.getCorporateActions({
+      instrumentId: "TSE:7203",
+      from: "2024-01-01T00:00:00.000Z",
+      to: "2024-01-31T00:00:00.000Z",
+    });
+    expect(actions).toHaveLength(1);
+    expect(CorporateAction.parse(actions[0])).toEqual(actions[0]);
+    expect(actions[0]!.type).toBe("SPLIT");
+    expect(actions[0]!.value).toBe("2");
+    expect(actions[0]!.exDate).toBe("2024-01-10T00:00:00.000Z");
   });
 });
 

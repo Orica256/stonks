@@ -22,6 +22,8 @@ describe("market-data contract conformance", () => {
     expect(typeof mdp.searchInstruments).toBe("function");
     expect(typeof mdp.getQuote).toBe("function");
     expect(typeof mdp.getBars).toBe("function");
+    // optional な getCorporateActions も registry は提供する（B12, spec §6.1）。
+    expect(typeof mdp.getCorporateActions).toBe("function");
     expect(typeof pp.getLatestPrice).toBe("function");
     expect(typeof fx.getRate).toBe("function");
   });

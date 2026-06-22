@@ -1,5 +1,7 @@
 import type {
+  CorporateAction,
   GetBarsRequest,
+  GetCorporateActionsRequest,
   PriceBar,
   Quote,
 } from "@stonks/contracts";
@@ -7,7 +9,7 @@ import { DomainError } from "@stonks/contracts";
 import type { AdapterDeps, ProviderAdapter } from "../types.js";
 import { defaultFetch, getJson, type FetchFn } from "../http.js";
 import { RateLimiter } from "../rate-limiter.js";
-import { toDecimalString } from "../decimal-util.js";
+import { toDecimalString, divideToDecimalString } from "../decimal-util.js";
 import { parseInstrumentId, toJQuantsCode } from "../symbols.js";
 
 const NAME = "jquants";
@@ -21,6 +23,12 @@ interface JQuantsDailyQuote {
   Low?: number | null;
   Close?: number | null;
   Volume?: number | null;
+  /**
+   * 株式分割/併合の調整係数（無料枠の daily_quotes に含まれる）。
+   * 通常日は 1。`!= 1` の日が分割の権利落ち日で、係数の逆数が分割比率
+   * （new/old）。例: 2:1 分割 → AdjustmentFactor 0.5 → 比率 2。
+   */
+  AdjustmentFactor?: number | null;
 }
 
 interface JQuantsDailyResponse {
@@ -176,5 +184,37 @@ export class JQuantsAdapter implements ProviderAdapter {
       });
     }
     return bars;
+  }
+
+  /**
+   * 配当/分割（コーポレートアクション）を取得する（spec §2.1 P1, §3.1: JP 権威データ）。
+   *
+   * 無料枠で得られるのは `daily_quotes` の `AdjustmentFactor`（分割/併合の調整係数）。
+   * 係数 `!= 1` の日が分割の権利落ち日で、その逆数が分割比率（new/old）。
+   * 配当（DIVIDEND）は J-Quants 無料枠の対象外（`/fins/dividend` は上位プラン）のため
+   * このアダプタでは SPLIT のみを返し、配当は Yahoo へフォールバックさせる。
+   */
+  async getCorporateActions(
+    req: GetCorporateActionsRequest,
+  ): Promise<CorporateAction[]> {
+    const parsed = parseInstrumentId(req.instrumentId);
+    const code = toJQuantsCode(parsed);
+    const from = new Date(req.from).toISOString().slice(0, 10);
+    const to = new Date(req.to).toISOString().slice(0, 10);
+    const rows = await this.fetchDaily(code, from, to);
+    const out: CorporateAction[] = [];
+    for (const r of rows) {
+      if (r.Date == null || r.AdjustmentFactor == null) continue;
+      // 通常日（係数 1）は権利落ちなし。0 や負値は異常値として無視する。
+      if (r.AdjustmentFactor === 1 || r.AdjustmentFactor <= 0) continue;
+      out.push({
+        instrumentId: req.instrumentId,
+        type: "SPLIT",
+        exDate: JQuantsAdapter.dateToIso(r.Date),
+        // 比率 = 1 / AdjustmentFactor（new shares / old shares）。
+        value: divideToDecimalString(1, r.AdjustmentFactor),
+      });
+    }
+    return out;
   }
 }

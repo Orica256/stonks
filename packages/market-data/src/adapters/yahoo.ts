@@ -1,5 +1,7 @@
 import type {
+  CorporateAction,
   GetBarsRequest,
+  GetCorporateActionsRequest,
   Instrument,
   Market,
   PriceBar,
@@ -10,7 +12,7 @@ import { DomainError } from "@stonks/contracts";
 import type { AdapterDeps, ProviderAdapter } from "../types.js";
 import { defaultFetch, getJson, type FetchFn } from "../http.js";
 import { RateLimiter } from "../rate-limiter.js";
-import { toDecimalString, epochSecToIso } from "../decimal-util.js";
+import { toDecimalString, divideToDecimalString, epochSecToIso } from "../decimal-util.js";
 import {
   buildInstrumentId,
   fromYahooSymbol,
@@ -32,6 +34,18 @@ const INTERVAL: Record<Timeframe, string> = {
   "1d": "1d",
 };
 
+interface YahooDividendEvent {
+  amount?: number;
+  date?: number; // epoch 秒（ex-date）
+}
+
+interface YahooSplitEvent {
+  numerator?: number;
+  denominator?: number;
+  splitRatio?: string; // "4:1" 等
+  date?: number; // epoch 秒（ex-date）
+}
+
 interface YahooChartResult {
   chart?: {
     result?: Array<{
@@ -41,6 +55,10 @@ interface YahooChartResult {
         currency?: string;
       };
       timestamp?: number[];
+      events?: {
+        dividends?: Record<string, YahooDividendEvent>;
+        splits?: Record<string, YahooSplitEvent>;
+      };
       indicators?: {
         quote?: Array<{
           open?: Array<number | null>;
@@ -159,6 +177,81 @@ export class YahooAdapter implements ProviderAdapter {
       });
     }
     return bars;
+  }
+
+  /**
+   * 配当/分割（コーポレートアクション）を取得する（spec §2.1 P1）。
+   *
+   * Yahoo chart の `events=div|split` は ex-date（epoch 秒）→ イベントの map を返す。
+   * - 配当: `amount` を DecimalString の配当額として正規化。
+   * - 分割: `numerator/denominator`（無ければ `splitRatio` "n:m"）から比率を算出。
+   * 1d interval（最小限のデータ）で期間分のイベントだけ取得する。期間外は呼び出し側で
+   * レジストリが再フィルタするが、ここでも from/to で素朴に絞り無駄を省く。
+   */
+  async getCorporateActions(
+    req: GetCorporateActionsRequest,
+  ): Promise<CorporateAction[]> {
+    const parsed = parseInstrumentId(req.instrumentId);
+    const sym = toYahooSymbol(parsed);
+    const period1 = Math.floor(new Date(req.from).getTime() / 1000);
+    const period2 = Math.floor(new Date(req.to).getTime() / 1000);
+    await this.limiter.take();
+    const url =
+      `${QUOTE_BASE}/${encodeURIComponent(sym)}` +
+      `?period1=${period1}&period2=${period2}&interval=1d&events=div%7Csplit`;
+    const raw = (await getJson(this.fetchFn, url, NAME, {
+      timeoutMs: this.timeoutMs,
+    })) as YahooChartResult;
+    const events = raw.chart?.result?.[0]?.events;
+    if (!events) return [];
+
+    const out: CorporateAction[] = [];
+    for (const div of Object.values(events.dividends ?? {})) {
+      if (div.amount == null || div.date == null) continue;
+      out.push({
+        instrumentId: req.instrumentId,
+        type: "DIVIDEND",
+        exDate: epochSecToIso(div.date),
+        value: toDecimalString(div.amount),
+      });
+    }
+    for (const sp of Object.values(events.splits ?? {})) {
+      if (sp.date == null) continue;
+      const ratio = YahooAdapter.splitRatio(sp);
+      if (ratio === null) continue;
+      out.push({
+        instrumentId: req.instrumentId,
+        type: "SPLIT",
+        exDate: epochSecToIso(sp.date),
+        value: ratio,
+      });
+    }
+    // ex-date 昇順で安定化（map の列挙順に依存しない）。
+    out.sort((a, b) => a.exDate.localeCompare(b.exDate));
+    return out;
+  }
+
+  /**
+   * 分割比率を DecimalString に正規化する（new shares / old shares）。
+   * 例 4:1 フォワード分割 → "4"、1:10 併合 → "0.1"。算出不能なら null。
+   */
+  private static splitRatio(sp: YahooSplitEvent): string | null {
+    if (sp.numerator != null && sp.denominator != null && sp.denominator !== 0) {
+      return divideToDecimalString(sp.numerator, sp.denominator);
+    }
+    if (sp.splitRatio) {
+      const [num, den] = sp.splitRatio.split(":").map((s) => Number(s.trim()));
+      if (
+        num != null &&
+        den != null &&
+        Number.isFinite(num) &&
+        Number.isFinite(den) &&
+        den !== 0
+      ) {
+        return divideToDecimalString(num, den);
+      }
+    }
+    return null;
   }
 
   async searchInstruments(q: string, market?: Market): Promise<Instrument[]> {
