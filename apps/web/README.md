@@ -13,7 +13,7 @@
 
 | ルート | 内容 |
 |---|---|
-| `/` | トレード（銘柄検索＋気配＋ローソク足チャート＋注文入力（単発＋複合 OCO/IFD/BRACKET）＋選択銘柄の配当・分割一覧／口座反映） |
+| `/` | トレード（銘柄検索＋気配＋ローソク足チャート＋注文入力（単発＋複合 OCO/IFD/BRACKET）＋オープン注文一覧＋選択銘柄の配当・分割一覧／口座反映） |
 | `/portfolio` | 総資産サマリ＋保有ポジション（評価額・含み損益）＋譲渡益課税（概算：通貨別の実現益/概算税率/概算税額。確定申告の正確計算ではなく投資助言でもない旨を併記） |
 | `/history` | 取引履歴（約定一覧） |
 | `/analysis` | 高度チャート（複数銘柄の正規化リターン比較・騰落率ヒートマップ・描画ツール） |
@@ -33,7 +33,14 @@
   `linkGroupId` 単位の一括取消（`DELETE /orders/groups/:linkGroupId`、`useCancelOrderGroup`）を提供する。
   ペイロード組み立てとクライアント側の最低限検証（数量>0・必要な指値/逆指値）・表示ラベルは純粋関数
   `src/features/order/bracket.ts`（Vitest 対象）に分離する。価格は DecimalString のまま送る（浮動小数化しない）。
-  注: 現状 api に注文一覧取得（`GET orders`）が無いため、可視化対象は「直近に発注したグループ」に限る。
+- `src/features/order/open-orders-panel.tsx` — オープン注文一覧（Phase 6。`GET /accounts/:id/orders`、`useOrders`）。
+  口座の全注文を取得し、オープン（`status` PENDING/PARTIALLY_FILLED、または `activation === "WAITING"`）に
+  web 側で絞って常時表示する。複合関係（`linkType` OCO/IFD・`linkGroupId`・`parentOrderId` 親子）でグルーピングし、
+  status/activation/種別/数量(約定/全)/価格/有効期限をバッジ付きで可視化。単発取消（`DELETE /orders/:id`、
+  `useCancelOrder`）と `linkGroupId` 単位のグループ取消（`useCancelOrderGroup`）を提供する。絞り込み・グルーピング・
+  status ラベルは純粋関数 `src/features/order/open-orders.ts`（Vitest 対象）に分離する。発注/取消の各ミューテーション
+  成功時に `orders` クエリも invalidate して一覧を再取得する。
+  注: api が `?open=true` フィルタ未対応でも壊れないよう、全件取得→web 側で絞る方針（`open` クエリは任意で付与可能）。
 - `src/features/instruments/corporate-actions-panel.tsx` — 選択銘柄の配当・分割一覧
   （`GET /instruments/:id/corporate-actions`）。各イベントを口座へ反映（`POST /accounts/:id/corporate-actions`、
   `useApplyCorporateAction`）。反映はシミュレーション上の処理（配当→現金、分割→保有数量）で実マネー移動はしない旨を併記。

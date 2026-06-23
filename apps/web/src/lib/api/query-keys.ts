@@ -10,6 +10,7 @@ export const queryKeys = {
   positions: (accountId: string) => ["positions", accountId] as const,
   summary: (accountId: string) => ["summary", accountId] as const,
   trades: (accountId: string) => ["trades", accountId] as const,
+  orders: (accountId: string) => ["orders", accountId] as const,
   history: (accountId: string) => ["history", accountId] as const,
   performance: (accountId: string, range?: string, benchmark?: string) =>
     ["performance", accountId, range ?? "default", benchmark ?? "default"] as const,

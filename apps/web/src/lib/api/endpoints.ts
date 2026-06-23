@@ -102,6 +102,28 @@ export function cancelOrder(orderId: string): Promise<Order> {
 }
 
 /**
+ * `GET /accounts/:id/orders`（口座の注文一覧。新しい順。Phase 6）。
+ *
+ * `open` を渡すと API 側でオープン注文（status PENDING/PARTIALLY_FILLED または
+ * activation==="WAITING"）に絞れる可能性があるが、未対応の API でも壊れないよう
+ * 呼び出し側で全件取得→web で絞る運用を正準とする（query は任意で付与）。
+ * 戻り値は契約型 `Order[]` そのまま（手書き型を作らない）。
+ */
+export function getOrders(
+  accountId: string,
+  open?: boolean,
+  signal?: AbortSignal,
+): Promise<Order[]> {
+  return apiRequest<Order[]>(
+    `/accounts/${encodeURIComponent(accountId)}/orders`,
+    {
+      query: open ? { open: "true" } : undefined,
+      signal,
+    },
+  );
+}
+
+/**
  * `POST /accounts/:id/orders/bracket`（複合発注 OCO / IFD / BRACKET。Phase 5）。
  *
  * 各 leg/parent/child の accountId はパスを正準として api 側が注入するため、
