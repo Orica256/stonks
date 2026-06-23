@@ -16,6 +16,7 @@ REST + SSE を公開する。**横依存は作らず、結合は contracts の I
 | メソッド | パス | 説明 |
 |---|---|---|
 | GET | `/instruments?q=&market=` | 銘柄検索 |
+| GET | `/instruments/:id` | 単一銘柄取得（`Instrument`。`id` は `EXCHANGE:SYMBOL`。見つからなければ 404） |
 | GET | `/instruments/:id/bars?timeframe=&from=&to=` | OHLCV バー取得 |
 | GET | `/instruments/:id/quote` | 最新気配 |
 | GET | `/instruments/:id/corporate-actions?from=&to=` | 配当/分割の取得（`exDate` が範囲内の `CorporateAction[]`。range 未指定は直近 1 年。未対応プロバイダは 501） |

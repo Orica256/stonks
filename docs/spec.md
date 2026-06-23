@@ -427,6 +427,7 @@ place_order(accountId, order, rationale)   cancel_order(orderId)
 REST（OpenAPI 公開）。代表エンドポイント:
 ```
 GET  /instruments?q=&market=
+GET  /instruments/:id              (単一銘柄取得。未存在は 404)
 GET  /instruments/:id/bars?timeframe=&from=&to=
 GET  /instruments/:id/quote
 GET  /quotes/stream            (SSE)
