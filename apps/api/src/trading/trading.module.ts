@@ -13,6 +13,7 @@ import {
   type InstrumentProvider,
   type OrderRepository,
 } from "@stonks/trading-engine";
+import type { MarginPolicyProvider } from "@stonks/contracts";
 import { TOKENS } from "../common/tokens.js";
 import type { AppConfig } from "../common/config.js";
 import { PersistenceModule } from "../persistence/persistence.module.js";
@@ -20,6 +21,7 @@ import { PortfolioModule } from "../portfolio/portfolio.module.js";
 import { MarketDataModule } from "../market-data/market-data.module.js";
 import { TradingService } from "./trading.service.js";
 import { OrdersController } from "./orders.controller.js";
+import { ConfigMarginPolicyProvider } from "./config-margin-policy.provider.js";
 
 /**
  * オープン注文の定期評価ループ（任意。ORDER_EVAL_INTERVAL_MS > 0 で有効）。
@@ -60,17 +62,25 @@ class OrderEvaluationScheduler
   imports: [PersistenceModule, PortfolioModule, MarketDataModule],
   controllers: [OrdersController],
   providers: [
+    // 信用（MARGIN）発注の保証金/金利規定値プロバイダ（config 由来。未配線だと
+    // trading-engine が MARGIN を一律拒否するため、ここで配線して受理可能にする）。
+    {
+      provide: TOKENS.MarginPolicyProvider,
+      useClass: ConfigMarginPolicyProvider,
+    },
     {
       provide: TOKENS.TradingEngine,
       inject: [
         TOKENS.OrderRepository,
         TOKENS.AccountStateProvider,
         TOKENS.InstrumentProvider,
+        TOKENS.MarginPolicyProvider,
       ],
       useFactory: (
         orders: OrderRepository,
         accountState: AccountStateProvider,
         instruments: InstrumentProvider,
+        marginPolicy: MarginPolicyProvider,
       ): StandardTradingEngine =>
         new StandardTradingEngine({
           orders,
@@ -78,6 +88,8 @@ class OrderEvaluationScheduler
           instruments,
           feeModel: new StandardFeeModel(),
           fillModel: new SlippageFillModel(),
+          // 信用ポリシーを注入することで MARGIN 発注の保証金充足判定が有効化される。
+          marginPolicy,
         }),
     },
     TradingService,

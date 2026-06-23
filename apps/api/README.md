@@ -20,7 +20,7 @@ REST + SSE を公開する。**横依存は作らず、結合は contracts の I
 | GET | `/instruments/:id/quote` | 最新気配 |
 | GET | `/instruments/:id/corporate-actions?from=&to=` | 配当/分割の取得（`exDate` が範囲内の `CorporateAction[]`。range 未指定は直近 1 年。未対応プロバイダは 501） |
 | GET | `/quotes/stream?ids=a,b` | 価格ストリーム（SSE・短間隔ポーリング） |
-| POST | `/accounts/:id/orders` | 発注（`PlaceOrderCommand`） |
+| POST | `/accounts/:id/orders` | 発注（`PlaceOrderCommand`。`marginType:"MARGIN"` で信用建て。既定/省略は現物 CASH） |
 | DELETE | `/orders/:id` | 注文取消 |
 | POST | `/orders/evaluate` | オープン注文の明示評価（約定→portfolio 反映） |
 | GET | `/accounts/:id/trades` | 取引履歴 |
@@ -58,6 +58,12 @@ REST + SSE を公開する。**横依存は作らず、結合は contracts の I
   `AccountStateProvider` / `InstrumentResolver` + 既定 Fee/Fill モデルで構成。
   `evaluateOpenOrders` は `POST /orders/evaluate`・定期インターバル
   （`ORDER_EVAL_INTERVAL_MS`）で駆動する最小実装。
+- **信用（MARGIN）**: `StandardTradingEngine` に `MarginPolicyProvider` を配線する
+  （`ConfigMarginPolicyProvider`。`TOKENS.MarginPolicyProvider`）。未配線だと engine が
+  MARGIN 発注を一律拒否するため、これを注入して `marginType:"MARGIN"` の発注を受理可能にする。
+  既定ポリシー（保証金率・金利）は `AppConfig.marginPolicy`（env で差し替え可）。信用不可銘柄は
+  `MARGIN_DISALLOWED_INSTRUMENTS` に列挙すると provider が null を返し当該銘柄の MARGIN を拒否する。
+  約定 `Trade` の `marginType` は portfolio が CASH/MARGIN 別建玉へ振り分ける（applyTrade）。
 - **約定の流し込み**: 評価で生じた `Trade` を `portfolio.applyTrade` に流す。取引履歴は
   portfolio が applyTrade で記録するため、`GET /accounts/:id/trades` は
   `PortfolioService.getTrades` に委譲する（旧 `TradeLog` ブリッジは B2 で廃止）。
@@ -84,6 +90,18 @@ contracts（`InstrumentId` / B1）で確定済み。`PriceProvider.getLatestPric
 
 `.env.example` を参照。`DATABASE_URL` 未設定なら in-memory 実装で起動する。
 秘密情報（API キー）はログ・レスポンスに出さない（CLAUDE.md §7）。
+
+信用（MARGIN）の既定ポリシーは env で差し替え可（すべて非負小数文字列、未設定なら既定値）:
+
+| キー | 既定 | 説明 |
+|---|---|---|
+| `MARGIN_INITIAL_RATE` | `0.30` | 必要保証金率（建玉時） |
+| `MARGIN_MAINTENANCE_RATE` | `0.20` | 維持保証金率（追証ライン） |
+| `MARGIN_ANNUAL_INTEREST_RATE` | `0.028` | 買い建て金利（年利） |
+| `MARGIN_ANNUAL_BORROW_RATE` | `0.011` | 売り建て貸株料（年利・任意） |
+| `MARGIN_DISALLOWED_INSTRUMENTS` | （空） | 信用不可銘柄（カンマ区切り `EXCHANGE:SYMBOL`）。MARGIN 発注を拒否 |
+
+> 既定値は日本信用の概算（シミュレーション既定値）であり投資情報の断定ではない（CLAUDE.md §7）。
 
 ## 実行
 
