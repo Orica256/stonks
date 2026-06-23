@@ -15,6 +15,7 @@ import type {
   Instrument,
   Market,
   Order,
+  PlaceBracketOrderCommand,
   PlaceOrderCommand,
   PortfolioSummary,
   PositionView,
@@ -191,6 +192,39 @@ export function usePlaceOrder(accountId: string) {
   const qc = useQueryClient();
   return useMutation<Order, Error, Omit<PlaceOrderCommand, "accountId">>({
     mutationFn: (command) => api.placeOrder(accountId, command),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.positions(accountId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.summary(accountId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.trades(accountId) });
+    },
+  });
+}
+
+/**
+ * 複合発注ミューテーション（OCO / IFD / BRACKET。Phase 5）。
+ * 成功時はポジション/サマリ/取引履歴を無効化する（単発 usePlaceOrder に倣う）。
+ * accountId はパス正準のため body に含めない。
+ */
+export function usePlaceBracketOrder(accountId: string) {
+  const qc = useQueryClient();
+  return useMutation<Order[], Error, PlaceBracketOrderCommand>({
+    mutationFn: (command) => api.placeBracketOrder(accountId, command),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.positions(accountId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.summary(accountId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.trades(accountId) });
+    },
+  });
+}
+
+/**
+ * 複合注文グループの一括取消ミューテーション（Phase 5）。
+ * グループ取消後はポジション/サマリ/取引履歴を無効化する。
+ */
+export function useCancelOrderGroup(accountId: string) {
+  const qc = useQueryClient();
+  return useMutation<Order[], Error, string>({
+    mutationFn: (linkGroupId) => api.cancelOrderGroup(linkGroupId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.positions(accountId) });
       void qc.invalidateQueries({ queryKey: queryKeys.summary(accountId) });

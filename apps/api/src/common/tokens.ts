@@ -13,6 +13,8 @@ export const TOKENS = {
   OrderRepository: "ORDER_REPOSITORY",
   AccountStateProvider: "ACCOUNT_STATE_PROVIDER",
   InstrumentProvider: "INSTRUMENT_PROVIDER",
+  /** 信用（MARGIN）発注の保証金/金利規定値プロバイダ（Phase 6 B）。 */
+  MarginPolicyProvider: "MARGIN_POLICY_PROVIDER",
 
   /** portfolio の PortfolioService 実装と内部リポジトリ。 */
   PortfolioService: "PORTFOLIO_SERVICE",

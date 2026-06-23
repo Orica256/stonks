@@ -11,6 +11,7 @@ import type {
   Market,
   Order,
   PerformanceSnapshot,
+  PlaceBracketOrderCommand,
   PlaceOrderCommand,
   PortfolioSummary,
   PositionView,
@@ -98,6 +99,34 @@ export function cancelOrder(orderId: string): Promise<Order> {
   return apiRequest<Order>(`/orders/${encodeURIComponent(orderId)}`, {
     method: "DELETE",
   });
+}
+
+/**
+ * `POST /accounts/:id/orders/bracket`（複合発注 OCO / IFD / BRACKET。Phase 5）。
+ *
+ * 各 leg/parent/child の accountId はパスを正準として api 側が注入するため、
+ * body には accountId を含めない（単発 placeOrder と同じ規約）。レスポンスは
+ * 生成された注文群 `Order[]`（OCO は 2、IFD は親 1＋子 N、bracket は親 1＋子 2）。
+ */
+export function placeBracketOrder(
+  accountId: string,
+  command: PlaceBracketOrderCommand,
+): Promise<Order[]> {
+  return apiRequest<Order[]>(
+    `/accounts/${encodeURIComponent(accountId)}/orders/bracket`,
+    { method: "POST", body: command },
+  );
+}
+
+/**
+ * `DELETE /orders/groups/:linkGroupId`（複合注文グループの一括取消。Phase 5）。
+ * グループに属するオープン/待機注文を CANCELLED にして返す。
+ */
+export function cancelOrderGroup(linkGroupId: string): Promise<Order[]> {
+  return apiRequest<Order[]>(
+    `/orders/groups/${encodeURIComponent(linkGroupId)}`,
+    { method: "DELETE" },
+  );
 }
 
 // ── portfolio ──
