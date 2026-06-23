@@ -5,6 +5,7 @@ import { QuotePanel } from "@/features/instruments/quote-panel";
 import { CorporateActionsPanel } from "@/features/instruments/corporate-actions-panel";
 import { ChartPanel } from "@/features/chart/chart-panel";
 import { OrderForm } from "@/features/order/order-form";
+import { BracketOrderForm } from "@/features/order/bracket-order-form";
 import { useSelectionStore } from "@/stores/selection-store";
 import { DEFAULT_ACCOUNT_ID } from "@/lib/env";
 
@@ -21,6 +22,7 @@ export default function TradePage(): JSX.Element {
         <InstrumentSearch />
         <QuotePanel instrument={selected} />
         <OrderForm accountId={DEFAULT_ACCOUNT_ID} instrument={selected} />
+        <BracketOrderForm accountId={DEFAULT_ACCOUNT_ID} instrument={selected} />
       </div>
       <div className="space-y-6">
         <ChartPanel instrument={selected} />

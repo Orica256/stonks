@@ -13,7 +13,7 @@
 
 | ルート | 内容 |
 |---|---|
-| `/` | トレード（銘柄検索＋気配＋ローソク足チャート＋注文入力＋選択銘柄の配当・分割一覧／口座反映） |
+| `/` | トレード（銘柄検索＋気配＋ローソク足チャート＋注文入力（単発＋複合 OCO/IFD/BRACKET）＋選択銘柄の配当・分割一覧／口座反映） |
 | `/portfolio` | 総資産サマリ＋保有ポジション（評価額・含み損益）＋譲渡益課税（概算：通貨別の実現益/概算税率/概算税額。確定申告の正確計算ではなく投資助言でもない旨を併記） |
 | `/history` | 取引履歴（約定一覧） |
 | `/analysis` | 高度チャート（複数銘柄の正規化リターン比較・騰落率ヒートマップ・描画ツール） |
@@ -24,6 +24,16 @@
 
 - `src/lib/api/` — 型付き HTTP クライアント（`client.ts`）、エンドポイント（`endpoints.ts`）、TanStack Query フック（`hooks.ts`）、SSE 気配ストリーム（`quote-stream.ts`）。
 - `src/features/` — 機能別 UI（instruments / chart / order / analysis / backtest / agent）。
+- `src/features/order/order-form.tsx` — 単発発注（`POST /accounts/:id/orders`、`usePlaceOrder`）。
+- `src/features/order/bracket-order-form.tsx` — 複合注文（OCO / IFD / BRACKET。Phase 5。
+  `POST /accounts/:id/orders/bracket`、`usePlaceBracketOrder`）。OCO は 2 脚、IFD は親 1＋子 N、
+  BRACKET は親 1＋子 2（利確/損切）を入力する。accountId はパス注入のため body に含めない。
+  発注後は返却された `Order[]` を一覧化し、発効状態（`activation` WAITING=「待機（親約定待ち）」／
+  ACTIVE=「有効」）・リンク種別（`linkType` OCO/IFD）・親子関係（`parentOrderId`）をバッジで可視化し、
+  `linkGroupId` 単位の一括取消（`DELETE /orders/groups/:linkGroupId`、`useCancelOrderGroup`）を提供する。
+  ペイロード組み立てとクライアント側の最低限検証（数量>0・必要な指値/逆指値）・表示ラベルは純粋関数
+  `src/features/order/bracket.ts`（Vitest 対象）に分離する。価格は DecimalString のまま送る（浮動小数化しない）。
+  注: 現状 api に注文一覧取得（`GET orders`）が無いため、可視化対象は「直近に発注したグループ」に限る。
 - `src/features/instruments/corporate-actions-panel.tsx` — 選択銘柄の配当・分割一覧
   （`GET /instruments/:id/corporate-actions`）。各イベントを口座へ反映（`POST /accounts/:id/corporate-actions`、
   `useApplyCorporateAction`）。反映はシミュレーション上の処理（配当→現金、分割→保有数量）で実マネー移動はしない旨を併記。
