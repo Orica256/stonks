@@ -64,6 +64,23 @@ export function getQuote(
   });
 }
 
+/**
+ * `GET /instruments/:id`（銘柄メタ情報。Phase 6）。
+ *
+ * instrumentId（`EXCHANGE:SYMBOL`）から契約型 `Instrument`（symbol/name/currency/
+ * exchange/lotSize 等）を解決する。見つからなければ api は 404 を返し、既存 `ApiError`
+ * として呼び出し側へ伝播する（捏造したフォールバック値を返さない）。戻り値は契約型そのまま。
+ */
+export function getInstrument(
+  instrumentId: string,
+  signal?: AbortSignal,
+): Promise<Instrument> {
+  return apiRequest<Instrument>(
+    `/instruments/${encodeURIComponent(instrumentId)}`,
+    { signal },
+  );
+}
+
 export function getBars(
   instrumentId: string,
   params: { timeframe: Timeframe; from?: string; to?: string },

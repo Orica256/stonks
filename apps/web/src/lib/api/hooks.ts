@@ -1,5 +1,6 @@
 import {
   useMutation,
+  useQueries,
   useQuery,
   useQueryClient,
   type UseMutationResult,
@@ -42,6 +43,58 @@ export function useInstruments(
     queryFn: ({ signal }) => api.searchInstruments(q, market, signal),
     enabled: q.trim().length > 0,
   });
+}
+
+/**
+ * 銘柄メタ情報（`GET /instruments/:id`。Phase 6）。
+ *
+ * instrumentId から `Instrument`（symbol/name/currency 等）を解決し、一覧の表示改善に使う。
+ * メタ情報はほぼ不変なので staleTime を長くとり、同一 id の重複取得を React Query の
+ * キャッシュで抑える。`instrumentId` が falsy のときは取得しない（enabled:false）。
+ * 未解決（404/エラー）でも呼び出し側が parseInstrumentId にフォールバックできるよう
+ * retry:false で穏当に縮退させる。
+ */
+export function useInstrument(
+  instrumentId: string | undefined,
+): UseQueryResult<Instrument> {
+  return useQuery({
+    queryKey: queryKeys.instrument(instrumentId ?? ""),
+    queryFn: ({ signal }) => api.getInstrument(instrumentId as string, signal),
+    enabled: Boolean(instrumentId),
+    staleTime: 60 * 60 * 1000,
+    retry: false,
+  });
+}
+
+/**
+ * 複数 instrumentId をまとめて解決し、id→Instrument の Map を返す（Phase 6）。
+ *
+ * 一覧（オープン注文など）で行ごとに無闇に多重 fetch する N+1 を避けるため、
+ * ユニークな id 集合に対してのみ取得する。各 id は React Query のキャッシュ
+ * （`useInstrument` と同じ queryKey）を共有するので重複取得が抑制される。
+ * 未解決（404/エラー）の id は Map に載らないだけで、呼び出し側は parseInstrumentId に
+ * フォールバックできる（捏造したエントリを入れない）。
+ */
+export function useInstrumentMap(
+  instrumentIds: readonly string[],
+): Map<string, Instrument> {
+  // 安定した順序のユニーク集合（依存比較の安定化のため文字列キー化）。
+  const uniqueIds = Array.from(new Set(instrumentIds)).sort();
+  const results = useQueries({
+    queries: uniqueIds.map((id) => ({
+      queryKey: queryKeys.instrument(id),
+      queryFn: ({ signal }: { signal?: AbortSignal }) =>
+        api.getInstrument(id, signal),
+      staleTime: 60 * 60 * 1000,
+      retry: false,
+    })),
+  });
+
+  const map = new Map<string, Instrument>();
+  results.forEach((result, i) => {
+    if (result.data) map.set(uniqueIds[i] as string, result.data);
+  });
+  return map;
 }
 
 export function useQuote(

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { Order } from "@stonks/contracts";
+import type { Instrument, Order } from "@stonks/contracts";
 import { OpenOrdersPanel } from "./open-orders-panel";
 
 /**
@@ -19,13 +19,31 @@ const hookState = {
   },
   cancelOrder: { mutate: cancelOrder, error: null as Error | null, isPending: false },
   cancelGroup: { mutate: cancelGroup, error: null as Error | null, isPending: false },
+  // instrumentId → Instrument の解決結果（既定は未解決＝フォールバック経路）。
+  instrumentMap: new Map<string, Instrument>(),
 };
 
 vi.mock("@/lib/api/hooks", () => ({
   useOrders: () => hookState.query,
   useCancelOrder: () => hookState.cancelOrder,
   useCancelOrderGroup: () => hookState.cancelGroup,
+  useInstrumentMap: () => hookState.instrumentMap,
 }));
+
+function instrument(partial: Partial<Instrument> & Pick<Instrument, "id">): Instrument {
+  return {
+    symbol: "7203",
+    exchange: "TSE",
+    market: "JP",
+    name: "トヨタ自動車",
+    currency: "JPY",
+    type: "STOCK",
+    lotSize: 100,
+    tickRules: [],
+    isActive: true,
+    ...partial,
+  };
+}
 
 function order(partial: Partial<Order> & Pick<Order, "id">): Order {
   return {
@@ -50,6 +68,7 @@ afterEach(() => {
   hookState.query = { data: undefined, isLoading: false, isError: false };
   hookState.cancelOrder = { mutate: cancelOrder, error: null, isPending: false };
   hookState.cancelGroup = { mutate: cancelGroup, error: null, isPending: false };
+  hookState.instrumentMap = new Map<string, Instrument>();
 });
 
 describe("OpenOrdersPanel", () => {
@@ -145,5 +164,73 @@ describe("OpenOrdersPanel", () => {
 
     expect(screen.getByText("待機（親約定待ち）")).toBeInTheDocument();
     expect(screen.getByText("子")).toBeInTheDocument();
+  });
+
+  it("Instrument 解決済みなら symbol・銘柄名・取引所バッジ・通貨整形を表示する", () => {
+    hookState.query = {
+      data: [
+        order({
+          id: "ord-jpy",
+          instrumentId: "TSE:7203",
+          type: "LIMIT",
+          limitPrice: "2500",
+        }),
+      ],
+      isLoading: false,
+      isError: false,
+    };
+    hookState.instrumentMap = new Map([
+      ["TSE:7203", instrument({ id: "TSE:7203" })],
+    ]);
+    render(<OpenOrdersPanel accountId="acc-1" />);
+
+    expect(screen.getByText("7203")).toBeInTheDocument();
+    expect(screen.getByText("（トヨタ自動車）")).toBeInTheDocument();
+    expect(screen.getByText("TSE")).toBeInTheDocument();
+    // JPY 整形（円記号付き・小数なし）で価格が出る（円記号の字形差は許容）。
+    expect(screen.getByText(/指 [¥￥]2,500/)).toBeInTheDocument();
+  });
+
+  it("未解決でも parseInstrumentId フォールバックで symbol・取引所・通貨を導出する", () => {
+    hookState.query = {
+      data: [
+        order({
+          id: "ord-usd",
+          instrumentId: "NASDAQ:AAPL",
+          type: "LIMIT",
+          limitPrice: "190.5",
+        }),
+      ],
+      isLoading: false,
+      isError: false,
+    };
+    // instrumentMap は空（404/ローディング相当）。
+    render(<OpenOrdersPanel accountId="acc-1" />);
+
+    expect(screen.getByText("AAPL")).toBeInTheDocument();
+    expect(screen.getByText("NASDAQ")).toBeInTheDocument();
+    // 銘柄名は捏造しない（名前の括弧表記は出ない）。
+    expect(screen.queryByText(/（.+）/)).not.toBeInTheDocument();
+    // NASDAQ→USD 導出で $ 整形（小数 2 桁）。
+    expect(screen.getByText(/指 \$190\.50/)).toBeInTheDocument();
+  });
+
+  it("instrumentId が不正形式なら生文字列を表示し価格は素のまま縮退する", () => {
+    hookState.query = {
+      data: [
+        order({
+          id: "ord-bad",
+          instrumentId: "not-an-id",
+          type: "LIMIT",
+          limitPrice: "100",
+        }),
+      ],
+      isLoading: false,
+      isError: false,
+    };
+    render(<OpenOrdersPanel accountId="acc-1" />);
+
+    expect(screen.getByText("not-an-id")).toBeInTheDocument();
+    expect(screen.getByText("指 100")).toBeInTheDocument();
   });
 });

@@ -4,6 +4,7 @@ import type { Market, Timeframe } from "@stonks/contracts";
 export const queryKeys = {
   instruments: (q: string, market?: Market) =>
     ["instruments", q, market ?? "ALL"] as const,
+  instrument: (instrumentId: string) => ["instrument", instrumentId] as const,
   quote: (instrumentId: string) => ["quote", instrumentId] as const,
   bars: (instrumentId: string, timeframe: Timeframe) =>
     ["bars", instrumentId, timeframe] as const,

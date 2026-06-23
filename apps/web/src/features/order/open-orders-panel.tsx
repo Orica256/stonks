@@ -1,14 +1,23 @@
 "use client";
 
 import { useMemo, type ReactNode } from "react";
-import type { Order } from "@stonks/contracts";
-import { useCancelOrder, useCancelOrderGroup, useOrders } from "@/lib/api/hooks";
+import type { Instrument, Order } from "@stonks/contracts";
+import {
+  useCancelOrder,
+  useCancelOrderGroup,
+  useInstrumentMap,
+  useOrders,
+} from "@/lib/api/hooks";
 import { ApiError } from "@/lib/api/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { cn } from "@/lib/cn";
-import { formatQuantity, formatTimestamp } from "@/lib/format";
+import { formatMoney, formatQuantity, formatTimestamp } from "@/lib/format";
+import {
+  resolveInstrumentDisplay,
+  type InstrumentDisplay,
+} from "@/lib/instrument-display";
 import {
   activationLabel,
   linkTypeLabel,
@@ -43,6 +52,18 @@ export function OpenOrdersPanel({
     [query.data],
   );
 
+  // 一覧に出る instrumentId のユニーク集合だけを解決し、行ごとの N+1 取得を避ける。
+  const instrumentIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          groups.flatMap((g) => g.orders.map((o) => o.instrumentId)),
+        ),
+      ),
+    [groups],
+  );
+  const instrumentMap = useInstrumentMap(instrumentIds);
+
   const cancelError =
     cancelOrder.error instanceof ApiError
       ? cancelOrder.error.message
@@ -75,6 +96,7 @@ export function OpenOrdersPanel({
                 <OrderGroupCard
                   key={group.key}
                   group={group}
+                  instrumentMap={instrumentMap}
                   onCancelOrder={(id) => cancelOrder.mutate(id)}
                   onCancelGroup={(gid) => cancelGroup.mutate(gid)}
                   cancelPending={cancelPending}
@@ -95,11 +117,13 @@ export function OpenOrdersPanel({
 /** 1 グループ（複合注文の束、または単発 1 件）の表示。 */
 function OrderGroupCard({
   group,
+  instrumentMap,
   onCancelOrder,
   onCancelGroup,
   cancelPending,
 }: {
   group: OrderGroup;
+  instrumentMap: Map<string, Instrument>;
   onCancelOrder: (orderId: string) => void;
   onCancelGroup: (linkGroupId: string) => void;
   cancelPending: boolean;
@@ -122,6 +146,10 @@ function OrderGroupCard({
           <OrderRow
             key={order.id}
             order={order}
+            display={resolveInstrumentDisplay(
+              order.instrumentId,
+              instrumentMap.get(order.instrumentId),
+            )}
             onCancel={() => onCancelOrder(order.id)}
             cancelPending={cancelPending}
           />
@@ -147,18 +175,23 @@ function OrderGroupCard({
 /** 1 注文の行表示（銘柄/売買/種別/数量/価格/有効期限/各種バッジ＋単発取消）。 */
 function OrderRow({
   order,
+  display,
   onCancel,
   cancelPending,
 }: {
   order: Order;
+  /** instrumentId を解決した表示情報（未解決時は parseInstrumentId フォールバック）。 */
+  display: InstrumentDisplay;
   onCancel: () => void;
   cancelPending: boolean;
 }): JSX.Element {
   const isChild = Boolean(order.parentOrderId);
-  // 注文は通貨情報を持たないため、価格は DecimalString をそのまま表示する
-  // （通貨換算/桁整形は銘柄文脈が要るため、ここでは加工しない）。
-  const limit = order.limitPrice ? `指 ${order.limitPrice}` : null;
-  const stop = order.stopPrice ? `逆 ${order.stopPrice}` : null;
+  // 価格は銘柄の通貨で整形する（JPY は ¥・USD は $）。
+  // 通貨が解決できなければ DecimalString 素表示に縮退する（捏造しない）。
+  const fmt = (value: string): string =>
+    display.currency ? formatMoney(value, display.currency) : value;
+  const limit = order.limitPrice ? `指 ${fmt(order.limitPrice)}` : null;
+  const stop = order.stopPrice ? `逆 ${fmt(order.stopPrice)}` : null;
   const price = [limit, stop].filter(Boolean).join(" / ") || "成行";
 
   return (
@@ -169,9 +202,11 @@ function OrderRow({
       )}
     >
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="font-medium text-neutral-700">
-          {order.instrumentId}
-        </span>
+        {display.exchange && <Badge tone="muted">{display.exchange}</Badge>}
+        <span className="font-medium text-neutral-700">{display.symbol}</span>
+        {display.name && (
+          <span className="text-neutral-500">（{display.name}）</span>
+        )}
         <span
           className={cn(
             "font-medium",
