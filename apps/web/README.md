@@ -25,6 +25,10 @@
 - `src/lib/api/` — 型付き HTTP クライアント（`client.ts`）、エンドポイント（`endpoints.ts`）、TanStack Query フック（`hooks.ts`）、SSE 気配ストリーム（`quote-stream.ts`）。
 - `src/features/` — 機能別 UI（instruments / chart / order / analysis / backtest / agent）。
 - `src/features/order/order-form.tsx` — 単発発注（`POST /accounts/:id/orders`、`usePlaceOrder`）。
+  資金区分（現物 CASH／信用 MARGIN。Phase 6）を選択でき、既定は CASH。CASH のときは `marginType` を
+  省略し従来の現物フローと完全後方互換、MARGIN のときのみ `marginType:"MARGIN"` を付与する（買い=信用買い建て／
+  売り=信用売り建て（空売り）。事実説明のみで助言にしない）。MARGIN 選択時は「シミュレーション上の建玉」である旨の
+  免責を表示する（CLAUDE.md §7）。信用不可銘柄／保証金不足など api/engine の 400 はそのまま `submitError` で表示する。
 - `src/features/order/bracket-order-form.tsx` — 複合注文（OCO / IFD / BRACKET。Phase 5。
   `POST /accounts/:id/orders/bracket`、`usePlaceBracketOrder`）。OCO は 2 脚、IFD は親 1＋子 N、
   BRACKET は親 1＋子 2（利確/損切）を入力する。accountId はパス注入のため body に含めない。
