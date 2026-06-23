@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import type {
   Instrument,
+  MarginType,
   OrderSide,
   OrderType,
   PlaceOrderCommand,
@@ -32,6 +33,7 @@ export function OrderForm({
 }): JSX.Element {
   const [side, setSide] = useState<OrderSide>("BUY");
   const [type, setType] = useState<OrderType>("MARKET");
+  const [marginType, setMarginType] = useState<MarginType>("CASH");
   const [quantity, setQuantity] = useState("");
   const [limitPrice, setLimitPrice] = useState("");
   const [stopPrice, setStopPrice] = useState("");
@@ -80,6 +82,9 @@ export function OrderForm({
       timeInForce,
       ...(needsLimit ? { limitPrice } : {}),
       ...(needsStop ? { stopPrice } : {}),
+      // 資金区分は MARGIN のときだけ付与する。CASH（既定）は従来どおり省略し、
+      // 現物フローと完全に後方互換にする（api/engine は未指定を CASH と解釈）。
+      ...(marginType === "MARGIN" ? { marginType: "MARGIN" as const } : {}),
     };
 
     mutation.mutate(command, {
@@ -139,6 +144,35 @@ export function OrderForm({
                 <option value="STOP_LIMIT">逆指値リミット (STOP_LIMIT)</option>
               </select>
             </label>
+
+            <div className="block text-sm">
+              <span className="text-neutral-500">資金区分</span>
+              <div className="mt-1 grid grid-cols-2 gap-2">
+                <SegmentedButton
+                  active={marginType === "CASH"}
+                  activeClass="bg-neutral-800 text-white"
+                  onClick={() => setMarginType("CASH")}
+                  label="現物 (CASH)"
+                />
+                <SegmentedButton
+                  active={marginType === "MARGIN"}
+                  activeClass="bg-neutral-800 text-white"
+                  onClick={() => setMarginType("MARGIN")}
+                  label="信用 (MARGIN)"
+                />
+              </div>
+            </div>
+
+            {marginType === "MARGIN" && (
+              <p className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-500">
+                {side === "BUY"
+                  ? "信用買い建て（ロング建玉）として発注します。"
+                  : "信用売り建て（空売り／ショート建玉）として発注します。"}
+                <br />
+                信用取引はシミュレーション上の建玉です（保証金・金利／貸株料も模擬計算）。
+                投資助言ではありません。
+              </p>
+            )}
 
             <label className="block text-sm">
               <span className="text-neutral-500">数量</span>
