@@ -6,6 +6,7 @@ import {
   HttpCode,
   Param,
   Post,
+  Query,
 } from "@nestjs/common";
 import {
   type Order,
@@ -24,6 +25,7 @@ import { TradingService } from "./trading.service.js";
  *   DELETE /orders/:id                   取消（単発）
  *   DELETE /orders/groups/:linkGroupId   グループ取消（Phase 5）
  *   POST   /orders/evaluate              オープン注文の明示評価（約定→portfolio 反映）
+ *   GET    /accounts/:id/orders          口座別注文一覧（?open=true でオープンのみ）
  */
 @Controller()
 export class OrdersController {
@@ -88,6 +90,30 @@ export class OrdersController {
   async trades(@Param("id") accountId: string): Promise<Trade[]> {
     return this.trading.listTrades(accountId);
   }
+
+  /**
+   * 口座別の注文一覧（新しい順）。status / activation / linkGroupId / linkType /
+   * parentOrderId をそのまま含む（web のオープン/複合注文一覧表示用）。
+   * `?open=true` のときはオープン注文（status PENDING/PARTIALLY_FILLED、
+   * または activation=WAITING の発効待ち）に絞る。
+   */
+  @Get("accounts/:id/orders")
+  async orders(
+    @Param("id") accountId: string,
+    @Query("open") open?: string,
+  ): Promise<Order[]> {
+    const all = await this.trading.listOrders(accountId);
+    if (open === "true") return all.filter(isOpenOrder);
+    return all;
+  }
+}
+
+/**
+ * オープン注文（約定待ち）判定。約定対象になり得る status か、発効待ち（WAITING）。
+ */
+function isOpenOrder(o: Order): boolean {
+  if (o.activation === "WAITING") return true;
+  return o.status === "PENDING" || o.status === "PARTIALLY_FILLED";
 }
 
 /** オブジェクトなら accountId を上書き注入する（複合発注の各 leg 用）。 */
