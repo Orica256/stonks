@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { createMarketDataProvider } from "@stonks/market-data";
 import { TOKENS } from "../common/tokens.js";
+import { PersistenceModule } from "../persistence/persistence.module.js";
 import { MarketDataController } from "./market-data.controller.js";
 
 /**
@@ -9,8 +10,12 @@ import { MarketDataController } from "./market-data.controller.js";
  *
  * 返る MarketDataRegistry は MarketDataProvider / PriceProvider / FxProvider を
  * 一体で満たすため、3 トークンとも同一インスタンスを指す（依存性逆転の供給点）。
+ *
+ * 単一銘柄取得（GET /instruments/:id）用に TOKENS.InstrumentProvider を解決するため
+ * PersistenceModule を import する（InstrumentProvider はそこで供給・export 済み）。
  */
 @Module({
+  imports: [PersistenceModule],
   controllers: [MarketDataController],
   providers: [
     {

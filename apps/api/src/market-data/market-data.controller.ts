@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Inject,
+  NotFoundException,
   NotImplementedException,
   Param,
   Query,
@@ -17,11 +18,13 @@ import {
   type Quote,
   Timeframe,
 } from "@stonks/contracts";
+import type { InstrumentProvider } from "@stonks/trading-engine";
 import { TOKENS } from "../common/tokens.js";
 
 /**
  * market-data の REST/SSE エンドポイント（spec §6.8）:
  *   GET /instruments?q=&market=
+ *   GET /instruments/:id                              (単一銘柄取得。見つからなければ 404)
  *   GET /instruments/:id/bars?timeframe=&from=&to=
  *   GET /instruments/:id/quote
  *   GET /instruments/:id/corporate-actions?from=&to=  (配当/分割。spec §2.1 P1)
@@ -34,6 +37,8 @@ export class MarketDataController {
     private readonly market: MarketDataProvider & {
       getQuote(id: string): Promise<Quote>;
     },
+    @Inject(TOKENS.InstrumentProvider)
+    private readonly instruments: InstrumentProvider,
   ) {}
 
   @Get("instruments")
@@ -43,6 +48,22 @@ export class MarketDataController {
   ): Promise<Instrument[]> {
     const m = market === "JP" || market === "US" ? (market as Market) : undefined;
     return this.market.searchInstruments(q ?? "", m);
+  }
+
+  /**
+   * 単一銘柄を取得する（id は EXCHANGE:SYMBOL 形式の正準 ID）。
+   * web の一覧（オープン注文・取引履歴等）で instrumentId を銘柄名・通貨付きで
+   * 表示するための補助ルート。見つからなければ 404 を返す。
+   *
+   * 末尾サブパス（/bars, /quote, /corporate-actions）とは別パスのため衝突しない。
+   */
+  @Get("instruments/:id")
+  async getById(@Param("id") id: string): Promise<Instrument> {
+    const instrument = await this.instruments.getById(id);
+    if (!instrument) {
+      throw new NotFoundException(`instrument not found: ${id}`);
+    }
+    return instrument;
   }
 
   @Get("instruments/:id/bars")
