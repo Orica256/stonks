@@ -20,7 +20,7 @@
   - 同一パス内の整合性: 評価直前に各注文を `findById` で読み直し、先行約定のカスケードで終端状態化/取消済みになっていれば評価しない。WAITING はパス開始時スナップショットの `activation` でも判定し、同一パスで発効した子は**次パスから**約定対象とする。
   - 孤児防止: 親が EXPIRED（DAY 失効）/`cancelOrder` された場合、未発効の WAITING 子を連動 `CANCELLED` にする。
 - **グループ取消 (`cancelOrderGroup(linkGroupId)`)**: 同 `linkGroupId` のオープン（PENDING/PARTIALLY_FILLED）と WAITING 子を一括 `CANCELLED`。終端状態（FILLED/CANCELLED 等）は据え置く。取消した `Order[]` を返す。
-- **リポジトリポート拡張**: カスケード解決のため `OrderRepository` に `findByLinkGroupId` / `findByParentOrderId` を追加（in-memory 実装同梱）。
+- **リポジトリポート拡張**: カスケード解決のため `OrderRepository` に `findByLinkGroupId` / `findByParentOrderId` を追加（in-memory 実装同梱）。注文一覧表示用に `listByAccount(accountId)` も追加（状態に依らず全件・`createdAt` 降順）。
 
 ## 設計上の制約（厳守）
 - **価格は `PriceProvider` IF 経由のみ**。`market-data` を直接 import しない（spec §4.3・§6.2）。

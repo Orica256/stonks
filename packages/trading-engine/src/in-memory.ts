@@ -56,6 +56,13 @@ export class InMemoryOrderRepository implements OrderRepository {
       .map((o) => ({ ...o }));
   }
 
+  async listByAccount(accountId: string): Promise<Order[]> {
+    return [...this.orders.values()]
+      .filter((o) => o.accountId === accountId)
+      .map((o) => ({ ...o }))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)); // createdAt 降順（新しい順）
+  }
+
   /** テスト補助: 全注文のスナップショット。 */
   all(): Order[] {
     return [...this.orders.values()].map((o) => ({ ...o }));
