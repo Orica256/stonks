@@ -431,6 +431,7 @@ GET  /instruments/:id/bars?timeframe=&from=&to=
 GET  /instruments/:id/quote
 GET  /quotes/stream            (SSE)
 POST /accounts/:id/orders
+GET  /accounts/:id/orders?open=    (注文一覧。open=true でオープン/待機のみ)
 DELETE /orders/:id
 GET  /accounts/:id/positions
 GET  /accounts/:id/summary

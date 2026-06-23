@@ -92,6 +92,17 @@ export function useTrades(accountId: string): UseQueryResult<Trade[]> {
   });
 }
 
+/**
+ * 口座の注文一覧（`GET /accounts/:id/orders`。Phase 6）。
+ * 全件取得し、オープン注文の絞り込みは UI 側（open-orders-panel）で行う。
+ */
+export function useOrders(accountId: string): UseQueryResult<Order[]> {
+  return useQuery({
+    queryKey: queryKeys.orders(accountId),
+    queryFn: ({ signal }) => api.getOrders(accountId, undefined, signal),
+  });
+}
+
 export function useHistory(accountId: string): UseQueryResult<EquityPoint[]> {
   return useQuery({
     queryKey: queryKeys.history(accountId),
@@ -196,6 +207,24 @@ export function usePlaceOrder(accountId: string) {
       void qc.invalidateQueries({ queryKey: queryKeys.positions(accountId) });
       void qc.invalidateQueries({ queryKey: queryKeys.summary(accountId) });
       void qc.invalidateQueries({ queryKey: queryKeys.trades(accountId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.orders(accountId) });
+    },
+  });
+}
+
+/**
+ * 単発注文の取消ミューテーション（`DELETE /orders/:id`）。
+ * 取消後はポジション/サマリ/取引履歴/注文一覧を無効化する。
+ */
+export function useCancelOrder(accountId: string) {
+  const qc = useQueryClient();
+  return useMutation<Order, Error, string>({
+    mutationFn: (orderId) => api.cancelOrder(orderId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.positions(accountId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.summary(accountId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.trades(accountId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.orders(accountId) });
     },
   });
 }
@@ -213,6 +242,7 @@ export function usePlaceBracketOrder(accountId: string) {
       void qc.invalidateQueries({ queryKey: queryKeys.positions(accountId) });
       void qc.invalidateQueries({ queryKey: queryKeys.summary(accountId) });
       void qc.invalidateQueries({ queryKey: queryKeys.trades(accountId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.orders(accountId) });
     },
   });
 }
@@ -229,6 +259,7 @@ export function useCancelOrderGroup(accountId: string) {
       void qc.invalidateQueries({ queryKey: queryKeys.positions(accountId) });
       void qc.invalidateQueries({ queryKey: queryKeys.summary(accountId) });
       void qc.invalidateQueries({ queryKey: queryKeys.trades(accountId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.orders(accountId) });
     },
   });
 }

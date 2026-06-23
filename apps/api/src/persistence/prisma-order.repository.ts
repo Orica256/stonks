@@ -44,6 +44,18 @@ export class PrismaOrderRepository implements OrderRepository {
     return rows.map(toOrder);
   }
 
+  /**
+   * 指定口座の全注文を createdAt 降順（新しい順）で返す（一覧表示用の読み取り）。
+   * 状態（オープン/WAITING/約定済み/取消）に依らず全件返す。
+   */
+  async listByAccount(accountId: string): Promise<Order[]> {
+    const rows = await this.db.order.findMany({
+      where: { accountId },
+      orderBy: { createdAt: "desc" },
+    });
+    return rows.map(toOrder);
+  }
+
   async update(order: Order): Promise<void> {
     await this.db.order.update({
       where: { id: order.id },

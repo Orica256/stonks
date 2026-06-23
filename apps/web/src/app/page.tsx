@@ -6,6 +6,7 @@ import { CorporateActionsPanel } from "@/features/instruments/corporate-actions-
 import { ChartPanel } from "@/features/chart/chart-panel";
 import { OrderForm } from "@/features/order/order-form";
 import { BracketOrderForm } from "@/features/order/bracket-order-form";
+import { OpenOrdersPanel } from "@/features/order/open-orders-panel";
 import { useSelectionStore } from "@/stores/selection-store";
 import { DEFAULT_ACCOUNT_ID } from "@/lib/env";
 
@@ -30,6 +31,7 @@ export default function TradePage(): JSX.Element {
           accountId={DEFAULT_ACCOUNT_ID}
           instrument={selected}
         />
+        <OpenOrdersPanel accountId={DEFAULT_ACCOUNT_ID} />
       </div>
     </div>
   );

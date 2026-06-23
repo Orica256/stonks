@@ -8,7 +8,10 @@ import {
   type PriceProvider,
   type Trade,
 } from "@stonks/contracts";
-import type { StandardTradingEngine } from "@stonks/trading-engine";
+import type {
+  OrderRepository,
+  StandardTradingEngine,
+} from "@stonks/trading-engine";
 import { TOKENS } from "../common/tokens.js";
 
 /**
@@ -28,6 +31,8 @@ export class TradingService {
     private readonly portfolio: PortfolioService,
     @Inject(TOKENS.PriceProvider)
     private readonly priceProvider: PriceProvider,
+    @Inject(TOKENS.OrderRepository)
+    private readonly orders: OrderRepository,
   ) {}
 
   placeOrder(cmd: PlaceOrderCommand): Promise<Order> {
@@ -84,5 +89,14 @@ export class TradingService {
 
   listTrades(accountId: string): Promise<Trade[]> {
     return this.portfolio.getTrades(accountId);
+  }
+
+  /**
+   * 指定口座の注文一覧を新しい順（createdAt 降順）で返す（一覧表示用）。
+   * 状態（オープン/WAITING/約定済み/取消）に依らず全件。複合注文の
+   * status / activation / linkGroupId / linkType / parentOrderId をそのまま含む。
+   */
+  listOrders(accountId: string): Promise<Order[]> {
+    return this.orders.listByAccount(accountId);
   }
 }

@@ -28,6 +28,12 @@ export interface OrderRepository {
    * 状態に依らず全件返す。
    */
   findByParentOrderId(parentOrderId: string): Promise<Order[]>;
+  /**
+   * 指定口座の全注文を返す（一覧表示用の読み取り）。
+   * 状態（オープン/WAITING/約定済み/取消）に依らず全件返す。
+   * 並び順は createdAt 降順（新しい順）。
+   */
+  listByAccount(accountId: string): Promise<Order[]>;
 }
 
 // 現金/保有の読み取りと銘柄解決は contracts の正式 IF を使う（B2）。

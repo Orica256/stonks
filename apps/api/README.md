@@ -23,6 +23,7 @@ REST + SSE を公開する。**横依存は作らず、結合は contracts の I
 | POST | `/accounts/:id/orders` | 発注（`PlaceOrderCommand`。`marginType:"MARGIN"` で信用建て。既定/省略は現物 CASH） |
 | DELETE | `/orders/:id` | 注文取消 |
 | POST | `/orders/evaluate` | オープン注文の明示評価（約定→portfolio 反映） |
+| GET | `/accounts/:id/orders?open=` | 口座別注文一覧（新しい順。`status`/`activation`/`linkGroupId`/`linkType`/`parentOrderId` 込み。`?open=true` でオープン/WAITING のみ） |
 | GET | `/accounts/:id/trades` | 取引履歴 |
 | GET | `/accounts/:id/positions` | 保有（評価額・含み損益込み） |
 | GET | `/accounts/:id/summary` | 総資産サマリ |
