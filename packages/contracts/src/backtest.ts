@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DateRange, DecimalString, Id, Timeframe } from "./common.js";
+import { DateRange, DecimalString, Id, Timeframe, Timestamp } from "./common.js";
 import { IndicatorSpec } from "./analytics.js";
 
 /**
@@ -39,7 +39,12 @@ export type BacktestMetrics = z.infer<typeof BacktestMetrics>;
 
 export const BacktestResult = z.object({
   metrics: BacktestMetrics,
-  equityCurve: z.array(z.object({ ts: z.string(), equity: DecimalString })),
+  /**
+   * エクイティカーブ。`ts` は UTC ISO8601（`Timestamp`。EquityPoint.ts と同形式）。
+   * 値は backtest runner が `Date#toISOString()` で生成する UTC 時刻のため、
+   * 緩い `z.string()` から `Timestamp` へ締めても実行時等価（型表現の厳格化のみ）。
+   */
+  equityCurve: z.array(z.object({ ts: Timestamp, equity: DecimalString })),
 });
 export type BacktestResult = z.infer<typeof BacktestResult>;
 
