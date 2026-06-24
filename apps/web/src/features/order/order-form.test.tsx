@@ -11,16 +11,26 @@ import { OrderForm } from "./order-form";
 
 const place = vi.fn();
 
+interface QueryLike {
+  data: unknown;
+  isLoading: boolean;
+  isError: boolean;
+}
+
 const hookState = {
   place: {
     mutate: place,
     error: null as Error | null,
     isPending: false,
   },
+  quote: { data: undefined, isLoading: false, isError: false } as QueryLike,
+  margin: { data: undefined, isLoading: false, isError: false } as QueryLike,
 };
 
 vi.mock("@/lib/api/hooks", () => ({
   usePlaceOrder: () => hookState.place,
+  useQuote: () => hookState.quote,
+  useMarginRequirement: () => hookState.margin,
 }));
 
 const instrument: Instrument = {
@@ -40,6 +50,8 @@ afterEach(() => {
   cleanup();
   place.mockReset();
   hookState.place = { mutate: place, error: null, isPending: false };
+  hookState.quote = { data: undefined, isLoading: false, isError: false };
+  hookState.margin = { data: undefined, isLoading: false, isError: false };
 });
 
 describe("OrderForm", () => {
@@ -147,5 +159,81 @@ describe("OrderForm", () => {
     const command = place.mock.calls[0]![0];
     expect(command).not.toHaveProperty("marginType");
     expect(command).toMatchObject({ type: "LIMIT", limitPrice: "1500" });
+  });
+
+  it("MARGIN かつ数量入力で必要保証金プレビューを表示する", () => {
+    hookState.margin = {
+      data: {
+        notional: "1500000",
+        requiredMargin: "450000",
+        initialMarginRate: "0.3",
+        currency: "JPY",
+      },
+      isLoading: false,
+      isError: false,
+    };
+
+    render(<OrderForm accountId="acc-1" instrument={instrument} />);
+    fireEvent.click(screen.getByRole("button", { name: "信用 (MARGIN)" }));
+    fireEvent.change(screen.getByPlaceholderText("100 株単位"), {
+      target: { value: "100" },
+    });
+
+    expect(screen.getByText("必要保証金")).toBeInTheDocument();
+    // 概算金額（JPY 整形）と率（%表示）が出る。
+    expect(screen.getByText("￥450,000")).toBeInTheDocument();
+    expect(screen.getByText("30%")).toBeInTheDocument();
+  });
+
+  it("MARGIN プレビュー取得失敗（信用不可）は縮退メッセージを出す", () => {
+    hookState.margin = { data: undefined, isLoading: false, isError: true };
+
+    render(<OrderForm accountId="acc-1" instrument={instrument} />);
+    fireEvent.click(screen.getByRole("button", { name: "信用 (MARGIN)" }));
+    fireEvent.change(screen.getByPlaceholderText("100 株単位"), {
+      target: { value: "100" },
+    });
+
+    expect(
+      screen.getByText(/保証金プレビューを取得できません/),
+    ).toBeInTheDocument();
+  });
+
+  it("marginTradable=false の銘柄では BUY の MARGIN 選択を無効化する", () => {
+    const noMargin: Instrument = { ...instrument, marginTradable: false };
+    render(<OrderForm accountId="acc-1" instrument={noMargin} />);
+
+    const marginButton = screen.getByRole("button", { name: "信用 (MARGIN)" });
+    expect(marginButton).toBeDisabled();
+  });
+
+  it("shortMarginable=false の銘柄で SELL の MARGIN 選択時は発注を抑止する", () => {
+    // marginTradable は不明、shortMarginable=false（売建不可）。
+    const noShort: Instrument = { ...instrument, shortMarginable: false };
+    render(<OrderForm accountId="acc-1" instrument={noShort} />);
+
+    // 売りに切替（SELL は shortMarginable=false で抑止対象）。
+    fireEvent.click(screen.getByRole("button", { name: "売り" }));
+    // BUY 不明なので MARGIN ボタンは押せる（side=SELL に切替後は disabled になる）。
+    const marginButton = screen.getByRole("button", { name: "信用 (MARGIN)" });
+    expect(marginButton).toBeDisabled();
+  });
+
+  it("marginTradable=false で MARGIN を選んでいる状態（side 切替経由）は発注を抑止する", () => {
+    // BUY は不明だが SELL は売建不可。BUY で MARGIN を選び、SELL に切替えると抑止される。
+    const noShort: Instrument = { ...instrument, shortMarginable: false };
+    render(<OrderForm accountId="acc-1" instrument={noShort} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "信用 (MARGIN)" }));
+    fireEvent.click(screen.getByRole("button", { name: "売り" }));
+    fireEvent.change(screen.getByPlaceholderText("100 株単位"), {
+      target: { value: "100" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "売り注文を出す" }));
+
+    expect(place).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(/信用売り建て（空売り）ができません/),
+    ).toBeInTheDocument();
   });
 });

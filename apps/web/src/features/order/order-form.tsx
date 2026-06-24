@@ -2,19 +2,27 @@
 
 import { useState, type FormEvent } from "react";
 import type {
+  Currency,
   Instrument,
+  MarginRequirement,
   MarginType,
   OrderSide,
   OrderType,
   PlaceOrderCommand,
   TimeInForce,
 } from "@stonks/contracts";
-import { usePlaceOrder } from "@/lib/api/hooks";
+import {
+  useMarginRequirement,
+  usePlaceOrder,
+  useQuote,
+} from "@/lib/api/hooks";
 import { ApiError } from "@/lib/api/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 import { cn } from "@/lib/cn";
+import { formatMoney, formatRatePercent } from "@/lib/format";
+import { isMarginEligible } from "@/lib/margin-eligibility";
 
 const DECIMAL_RE = /^\d+(\.\d+)?$/;
 
@@ -46,6 +54,37 @@ export function OrderForm({
   const needsLimit = type === "LIMIT" || type === "STOP_LIMIT";
   const needsStop = type === "STOP" || type === "STOP_LIMIT";
 
+  const isMargin = marginType === "MARGIN";
+
+  // 銘柄マスタ由来の信用建て可否（純粋判定。undefined=不明は抑止しない）。
+  const eligible = isMarginEligible(instrument, side);
+  const marginBlocked = isMargin && eligible === false;
+
+  // 保証金プレビューに使う価格: 指値系は入力値、成行は最新気配の last。
+  // 既存の useQuote を再利用する（MARGIN かつ成行のときだけ取得すれば十分だが、
+  // 価格未確定でも quote 取得自体は QuotePanel と同キャッシュを共有するため無害）。
+  const quoteQuery = useQuote(isMargin ? instrument?.id : undefined);
+  const qtyNum = Number(quantity);
+  const hasValidQty = Number.isFinite(qtyNum) && qtyNum > 0;
+  const previewPrice = needsLimit
+    ? DECIMAL_RE.test(limitPrice)
+      ? limitPrice
+      : undefined
+    : quoteQuery.data?.last;
+  // 成行は価格を api の最新値に委ねたい（previewPrice=undefined のとき api が補完）が、
+  // ここでは取得済みの quote があればそれを送り、無ければ undefined で api 任せにする。
+  const previewEnabled = isMargin && !marginBlocked && hasValidQty;
+  const marginQuery = useMarginRequirement(
+    instrument?.id,
+    {
+      side,
+      quantity: hasValidQty ? qtyNum : 0,
+      price: previewPrice,
+      marginType: "MARGIN",
+    },
+    previewEnabled,
+  );
+
   function reset(): void {
     setQuantity("");
     setLimitPrice("");
@@ -58,6 +97,15 @@ export function OrderForm({
     setPlaced(null);
 
     if (!instrument) return;
+
+    if (marginBlocked) {
+      setLocalError(
+        side === "BUY"
+          ? "この銘柄は信用買い建てができません（現物を選択してください）。"
+          : "この銘柄は信用売り建て（空売り）ができません。",
+      );
+      return;
+    }
 
     const qty = Number(quantity);
     if (!Number.isFinite(qty) || qty <= 0) {
@@ -159,11 +207,19 @@ export function OrderForm({
                   activeClass="bg-neutral-800 text-white"
                   onClick={() => setMarginType("MARGIN")}
                   label="信用 (MARGIN)"
+                  disabled={eligible === false}
+                  title={
+                    eligible === false
+                      ? side === "BUY"
+                        ? "この銘柄は信用買い建てができません。"
+                        : "この銘柄は信用売り建て（空売り）ができません。"
+                      : undefined
+                  }
                 />
               </div>
             </div>
 
-            {marginType === "MARGIN" && (
+            {isMargin && (
               <p className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-500">
                 {side === "BUY"
                   ? "信用買い建て（ロング建玉）として発注します。"
@@ -172,6 +228,26 @@ export function OrderForm({
                 信用取引はシミュレーション上の建玉です（保証金・金利／貸株料も模擬計算）。
                 投資助言ではありません。
               </p>
+            )}
+
+            {isMargin && marginBlocked && (
+              <ErrorState
+                message={
+                  side === "BUY"
+                    ? "この銘柄は制度上、信用買い建てができません。現物 (CASH) を選択してください。"
+                    : "この銘柄は制度上、信用売り建て（空売り）ができません。"
+                }
+              />
+            )}
+
+            {isMargin && !marginBlocked && (
+              <MarginPreview
+                currency={instrument.currency}
+                requirement={marginQuery.data ?? null}
+                isLoading={previewEnabled && marginQuery.isLoading}
+                isError={previewEnabled && marginQuery.isError}
+                hasInput={hasValidQty}
+              />
             )}
 
             <label className="block text-sm">
@@ -223,7 +299,7 @@ export function OrderForm({
             <Button
               type="submit"
               variant={side === "BUY" ? "primary" : "danger"}
-              disabled={mutation.isPending}
+              disabled={mutation.isPending || marginBlocked}
               className="w-full"
             >
               {mutation.isPending
@@ -242,23 +318,110 @@ function SegmentedButton({
   activeClass,
   onClick,
   label,
+  disabled = false,
+  title,
 }: {
   active: boolean;
   activeClass: string;
   onClick: () => void;
   label: string;
+  disabled?: boolean;
+  title?: string | undefined;
 }): JSX.Element {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
+      title={title}
       className={cn(
         "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
         active ? activeClass : "bg-neutral-100 text-neutral-600",
+        disabled && "cursor-not-allowed opacity-50",
       )}
     >
       {label}
     </button>
+  );
+}
+
+/**
+ * 信用建ての必要保証金プレビュー（概算）。値は DecimalString のまま受け取り
+ * 表示整形のみ行う（CLAUDE.md §0）。捏造値を出さないため、未確定/ロード中/取得失敗は
+ * 「—」やメッセージで縮退する。投資助言ではない旨の免責を添える（CLAUDE.md §7）。
+ */
+function MarginPreview({
+  currency,
+  requirement,
+  isLoading,
+  isError,
+  hasInput,
+}: {
+  currency: Currency;
+  requirement: MarginRequirement | null;
+  isLoading: boolean;
+  isError: boolean;
+  hasInput: boolean;
+}): JSX.Element {
+  const body = !hasInput ? (
+    <p className="text-xs text-neutral-400">
+      数量を入力すると必要保証金（概算）を表示します。
+    </p>
+  ) : isError ? (
+    <p className="text-xs text-neutral-500">
+      この条件では保証金プレビューを取得できません（信用不可の可能性があります）。
+    </p>
+  ) : isLoading || !requirement ? (
+    <dl className="grid grid-cols-3 gap-2 text-sm">
+      <PreviewField label="総代金" value="—" />
+      <PreviewField label="必要保証金" value="—" />
+      <PreviewField label="保証金率" value="—" />
+    </dl>
+  ) : (
+    <dl className="grid grid-cols-3 gap-2 text-sm">
+      <PreviewField
+        label="総代金"
+        value={formatMoney(requirement.notional, requirement.currency)}
+      />
+      <PreviewField
+        label="必要保証金"
+        value={formatMoney(requirement.requiredMargin, requirement.currency)}
+      />
+      <PreviewField
+        label="保証金率"
+        value={formatRatePercent(requirement.initialMarginRate)}
+      />
+    </dl>
+  );
+
+  return (
+    <div className="space-y-2 rounded-md border border-neutral-200 px-3 py-2">
+      <div className="flex items-baseline justify-between">
+        <span className="text-xs font-medium text-neutral-500">
+          保証金プレビュー（概算 / {currency}）
+        </span>
+      </div>
+      {body}
+      <p className="text-[11px] leading-snug text-neutral-400">
+        必要保証金は最新気配または指値に基づく概算で、実際の約定価格・手数料により変動します。
+        シミュレーションであり投資助言ではありません。
+      </p>
+    </div>
+  );
+}
+
+function PreviewField({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}): JSX.Element {
+  return (
+    <div className="rounded-md bg-neutral-50 px-2 py-1.5">
+      <dt className="text-[11px] text-neutral-400">{label}</dt>
+      <dd className="tabular-nums font-medium text-neutral-800">{value}</dd>
+    </div>
   );
 }
 
