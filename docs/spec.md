@@ -452,17 +452,27 @@ GET  /instruments/:id              (単一銘柄取得。未存在は 404)
 GET  /instruments/:id/bars?timeframe=&from=&to=
 GET  /instruments/:id/quote
 GET  /instruments/:id/margin-requirement?side=&quantity=&price=&marginType=  (必要保証金プレビュー。信用建て前提)
+GET  /instruments/:id/corporate-actions?from=&to=  (配当/分割イベント。P1)
+POST /instruments/:id/indicators      (テクニカル指標の計算。OHLCV→指標系列)
 GET  /quotes/stream            (SSE)
 POST /accounts/:id/orders
 GET  /accounts/:id/orders?open=    (注文一覧。open=true でオープン/待機のみ)
+POST /accounts/:id/orders/bracket  (複合注文 OCO/IFD/bracket の発注。P2)
 DELETE /orders/:id
+DELETE /orders/groups/:id          (linkGroupId 単位の一括取消。P2)
+POST /orders/evaluate              (オープン注文を現在価格で評価し約定生成)
 GET  /accounts/:id/positions
 GET  /accounts/:id/summary
 GET  /accounts/:id/trades
+GET  /accounts/:id/history          (資産推移=エクイティカーブ)
+GET  /accounts/:id/tax?from=&to=    (譲渡益課税の概算。P1。既定=年初来)
+POST /accounts/:id/corporate-actions  (配当受取/分割調整の適用。P1)
 POST /backtests
 POST /agents                          (AgentProfile 作成)
+GET  /agents/:id                       (AgentProfile 取得)
 POST /accounts/:id/agent-decisions    (AI 発注 = rationale 付き)
 GET  /accounts/:id/decisions          (意思決定ログ閲覧)
+GET  /accounts/:id/observation        (自律ループ向け観測=市況/保有/成績の要約)
 GET  /accounts/:id/performance?range= (成績・ベンチ比較)
 ```
 
