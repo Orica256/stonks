@@ -300,7 +300,9 @@ RealizedPnl
   realized, currency, closedAt
 
 TaxLot（税ロット, P2）
-  id, accountId, instrumentId, quantity, costBasis, acquiredAt, method
+  id, accountId, instrumentId, quantity, costBasis, acquiredAt, method, marginType
+  ※ marginType（CASH/MARGIN, 既定 CASH）で資金区分ごとに税ロットを分離し、FIFO/LIFO の取り崩しが
+    CASH 現物と MARGIN 信用で混ざらないようにする（Phase 8）。
 
 Watchlist / WatchlistItem
   id, accountId, name / instrumentId

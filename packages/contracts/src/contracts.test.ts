@@ -11,6 +11,7 @@ import {
   BenchmarkComparisonResult,
   AgentObservation,
   BacktestResult,
+  TaxLot,
 } from "./index.js";
 
 describe("Money schema", () => {
@@ -284,5 +285,35 @@ describe("Instrument schema", () => {
     });
     expect(r.marginTradable).toBe(true);
     expect(r.shortMarginable).toBe(false);
+  });
+});
+
+describe("TaxLot.marginType (Phase 8: CASH/MARGIN 税ロット分離)", () => {
+  const base = {
+    id: "lot1",
+    accountId: "a1",
+    instrumentId: "TSE:7203",
+    quantity: 100,
+    remainingQuantity: 100,
+    costBasis: "1000",
+    currency: "JPY",
+    acquiredAt: "2026-06-24T00:00:00Z",
+  };
+
+  it("parses without marginType (後方互換: 未指定は現物 CASH 相当)", () => {
+    const r = TaxLot.safeParse(base);
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.marginType).toBeUndefined();
+  });
+
+  it('accepts marginType "MARGIN"', () => {
+    const r = TaxLot.safeParse({ ...base, marginType: "MARGIN" });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.marginType).toBe("MARGIN");
+  });
+
+  it("rejects an invalid marginType", () => {
+    const r = TaxLot.safeParse({ ...base, marginType: "LEVERAGE" });
+    expect(r.success).toBe(false);
   });
 });

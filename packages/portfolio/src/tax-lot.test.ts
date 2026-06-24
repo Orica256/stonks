@@ -135,3 +135,98 @@ describe("MARGIN 建玉", () => {
     expect(pos?.marginType).toBe("MARGIN");
   });
 });
+
+describe("取り崩し — 資金区分（CASH/MARGIN）分離（Phase 8）", () => {
+  /**
+   * 同一銘柄で CASH 現物（100@1000）と MARGIN 信用（100@1200）の 2 ロットを建てる。
+   * Phase 5 申し送り: 区別なく FIFO/LIFO で混ぜると取り崩し順・原価が誤る。
+   */
+  const buyCashAndMargin = async (svc: DefaultPortfolioService) => {
+    await svc.deposit(ACC, { amount: "10000000", currency: "JPY" });
+    await svc.applyTrade(
+      trade({
+        quantity: 100,
+        price: "1000",
+        fee: "0",
+        marginType: "CASH",
+        executedAt: "2026-06-19T01:00:00.000Z",
+      }),
+    );
+    await svc.applyTrade(
+      trade({
+        quantity: 100,
+        price: "1200",
+        fee: "0",
+        marginType: "MARGIN",
+        executedAt: "2026-06-19T02:00:00.000Z",
+      }),
+    );
+  };
+
+  it("取得時にロットへ marginType が付与される（未指定=CASH）", async () => {
+    const { svc } = makeSvc("FIFO");
+    await buyCashAndMargin(svc);
+    const lots = await svc.getTaxLots(ACC);
+    expect(lots).toHaveLength(2);
+    expect((lots[0]!.marginType ?? "CASH")).toBe("CASH");
+    expect(lots[1]!.marginType).toBe("MARGIN");
+  });
+
+  it("FIFO: CASH の売りは CASH ロットのみを取り崩す（MARGIN ロットは無傷）", async () => {
+    const { repo, svc } = makeSvc("FIFO");
+    await buyCashAndMargin(svc);
+    // CASH を 60 売る。MARGIN(1200) を混ぜれば原価が変わるが、区分内のみで算出する。
+    await svc.applyTrade(
+      trade({
+        side: "SELL",
+        quantity: 60,
+        price: "1500",
+        fee: "0",
+        marginType: "CASH",
+        executedAt: "2026-06-19T03:00:00.000Z",
+      }),
+    );
+
+    const lots = await svc.getTaxLots(ACC);
+    const cashLot = lots.find((l) => (l.marginType ?? "CASH") === "CASH")!;
+    const marginLot = lots.find((l) => l.marginType === "MARGIN")!;
+    expect(cashLot.remainingQuantity).toBe(40); // 100 - 60
+    expect(marginLot.remainingQuantity).toBe(100); // 無傷
+
+    const withLots = await repo.listRealizedPnlWithLots(ACC);
+    expect(withLots).toHaveLength(1);
+    expect(withLots[0]!.lots).toHaveLength(1);
+    expect(withLots[0]!.lots[0]!.taxLotId).toBe(cashLot.id);
+    // costBasis = 60*1000 = 60000、realized = 60*1500 - 60000 = 30000
+    expect(new Decimal(withLots[0]!.costBasis).equals("60000")).toBe(true);
+    expect(new Decimal(withLots[0]!.realized).equals("30000")).toBe(true);
+  });
+
+  it("LIFO: MARGIN の売りは MARGIN ロットのみを取り崩す（CASH ロットは無傷）", async () => {
+    const { repo, svc } = makeSvc("LIFO");
+    await buyCashAndMargin(svc);
+    await svc.applyTrade(
+      trade({
+        side: "SELL",
+        quantity: 60,
+        price: "1500",
+        fee: "0",
+        marginType: "MARGIN",
+        executedAt: "2026-06-19T03:00:00.000Z",
+      }),
+    );
+
+    const lots = await svc.getTaxLots(ACC);
+    const cashLot = lots.find((l) => (l.marginType ?? "CASH") === "CASH")!;
+    const marginLot = lots.find((l) => l.marginType === "MARGIN")!;
+    expect(cashLot.remainingQuantity).toBe(100); // 無傷
+    expect(marginLot.remainingQuantity).toBe(40); // 100 - 60
+
+    const withLots = await repo.listRealizedPnlWithLots(ACC);
+    expect(withLots[0]!.lots).toHaveLength(1);
+    expect(withLots[0]!.lots[0]!.taxLotId).toBe(marginLot.id);
+    // costBasis = 60*1200 = 72000、realized = 60*1500 - 72000 = 18000
+    expect(new Decimal(withLots[0]!.costBasis).equals("72000")).toBe(true);
+    expect(new Decimal(withLots[0]!.realized).equals("18000")).toBe(true);
+  });
+});
