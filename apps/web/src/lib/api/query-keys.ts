@@ -41,6 +41,8 @@ export const queryKeys = {
       range?.from ?? "all",
       range?.to ?? "all",
     ] as const,
+  taxLots: (accountId: string, open?: boolean) =>
+    ["tax-lots", accountId, open ? "open" : "all"] as const,
   corporateActions: (
     instrumentId: string,
     range?: { from?: string; to?: string },

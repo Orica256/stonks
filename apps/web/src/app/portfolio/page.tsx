@@ -22,6 +22,7 @@ import {
   pnlColorClass,
 } from "@/lib/format";
 import { MarginBadge } from "@/components/ui/margin-badge";
+import { TaxLotsPanel } from "@/features/portfolio/tax-lots-panel";
 import { DEFAULT_ACCOUNT_ID } from "@/lib/env";
 
 /**
@@ -180,6 +181,8 @@ export default function PortfolioPage(): JSX.Element {
           </p>
         </CardContent>
       </Card>
+
+      <TaxLotsPanel accountId={accountId} />
     </div>
   );
 }

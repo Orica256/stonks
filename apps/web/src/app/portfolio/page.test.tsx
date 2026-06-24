@@ -2,8 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import type {
   CapitalGainsTaxEstimate,
+  Instrument,
   PortfolioSummary,
   PositionView,
+  TaxLot,
 } from "@stonks/contracts";
 import PortfolioPage from "./page";
 
@@ -32,12 +34,21 @@ const hookState = {
     isError: false,
     error: null as Error | null,
   },
+  taxLots: {
+    data: undefined as TaxLot[] | undefined,
+    isLoading: false,
+    isError: false,
+    error: null as Error | null,
+  },
+  instrumentMap: new Map<string, Instrument>(),
 };
 
 vi.mock("@/lib/api/hooks", () => ({
   usePositions: () => hookState.positions,
   useSummary: () => hookState.summary,
   useCapitalGainsTax: () => hookState.tax,
+  useTaxLots: () => hookState.taxLots,
+  useInstrumentMap: () => hookState.instrumentMap,
 }));
 
 vi.mock("@/lib/env", () => ({
@@ -82,6 +93,13 @@ afterEach(() => {
     isError: false,
     error: null,
   };
+  hookState.taxLots = {
+    data: undefined,
+    isLoading: false,
+    isError: false,
+    error: null,
+  };
+  hookState.instrumentMap = new Map<string, Instrument>();
 });
 
 describe("PortfolioPage", () => {
