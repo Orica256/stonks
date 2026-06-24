@@ -6,6 +6,7 @@ import {
   Quantity,
   Timestamp,
 } from "./common.js";
+import { MarginType } from "./margin.js";
 
 /**
  * 税ロット管理（tax lot）の契約（spec §2.3 P2 / §5.1 TaxLot）。
@@ -63,6 +64,12 @@ export const TaxLot = z.object({
   method: CostBasisMethod.default("AVERAGE"),
   /** 口座区分（特定/一般 等。既定 SPECIFIC）。 */
   taxAccountType: TaxAccountType.default("SPECIFIC"),
+  /**
+   * 資金区分。未指定=CASH 現物。CASH/MARGIN の税ロットを分離して取り崩すために使う。Phase 8。
+   * （`.default()` ではなく optional にするのは、z.infer 出力型を必須化せず既存の手組み record /
+   * 他フィールド（acquiredTradeId 等）の方針と揃えるため。読み手は `marginType ?? "CASH"` で解釈する。）
+   */
+  marginType: MarginType.optional(),
   /** ロットを生成した約定（取得元 Trade）。 */
   acquiredTradeId: Id.optional(),
 });

@@ -375,6 +375,7 @@ model TaxLot {
   acquiredAt        DateTime        @default(now())
   method            CostBasisMethod @default(AVERAGE)
   taxAccountType    TaxAccountType  @default(SPECIFIC)
+  marginType        MarginType      @default(CASH) // 資金区分（Phase 8。CASH/MARGIN の税ロットを分離して取り崩す）
   acquiredTradeId   String? // 取得元 Trade
 
   account    Account    @relation(fields: [accountId], references: [id])
