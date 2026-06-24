@@ -14,6 +14,7 @@ import type {
   CorporateAction,
   EquityPoint,
   Instrument,
+  MarginRequirement,
   Market,
   Order,
   PlaceBracketOrderCommand,
@@ -105,6 +106,34 @@ export function useQuote(
     queryFn: ({ signal }) => api.getQuote(instrumentId as string, signal),
     enabled: Boolean(instrumentId),
     refetchInterval: 15_000,
+  });
+}
+
+/**
+ * 信用建ての必要保証金プレビュー（`GET /instruments/:id/margin-requirement`。Phase 7）。
+ *
+ * side/数量/価格が確定したときだけ取得する（数量 0 や instrument 未選択では enabled:false）。
+ * 信用不可（api が HTTP 400）は `ApiError` として error 状態で拾い、UI で「プレビュー不可
+ * （信用不可）」と縮退表示する。捏造した保証金値を返さないため retry:false で穏当に止める。
+ * 価格未指定（price:undefined）のときは api 側が最新価格を使う。
+ */
+export function useMarginRequirement(
+  instrumentId: string | undefined,
+  params: api.MarginRequirementParams,
+  enabled: boolean,
+): UseQueryResult<MarginRequirement> {
+  return useQuery({
+    queryKey: queryKeys.marginRequirement(
+      instrumentId ?? "",
+      params.side,
+      params.quantity,
+      params.price,
+      params.marginType ?? "MARGIN",
+    ),
+    queryFn: ({ signal }) =>
+      api.getMarginRequirement(instrumentId as string, params, signal),
+    enabled: Boolean(instrumentId) && enabled && params.quantity > 0,
+    retry: false,
   });
 }
 

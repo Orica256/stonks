@@ -6,6 +6,21 @@ export const queryKeys = {
     ["instruments", q, market ?? "ALL"] as const,
   instrument: (instrumentId: string) => ["instrument", instrumentId] as const,
   quote: (instrumentId: string) => ["quote", instrumentId] as const,
+  marginRequirement: (
+    instrumentId: string,
+    side: string,
+    quantity: number,
+    price: string | undefined,
+    marginType: string,
+  ) =>
+    [
+      "margin-requirement",
+      instrumentId,
+      side,
+      quantity,
+      price ?? "latest",
+      marginType,
+    ] as const,
   bars: (instrumentId: string, timeframe: Timeframe) =>
     ["bars", instrumentId, timeframe] as const,
   positions: (accountId: string) => ["positions", accountId] as const,

@@ -28,5 +28,16 @@ export const Instrument = z.object({
   /** 呼値ルール（昇順）。空なら任意刻み。 */
   tickRules: z.array(TickRule).default([]),
   isActive: z.boolean().default(true),
+  /**
+   * 信用買い建て（制度/一般信用での新規買建）が制度上可能か。銘柄マスタ由来。
+   * 未指定(undefined)=不明。`MarginPolicyProvider.getMarginPolicy()=null`（ポリシー設定上の不可）
+   * とは別レイヤ（こちらは銘柄そのものの貸借区分上の可否）。
+   */
+  marginTradable: z.boolean().optional(),
+  /**
+   * 信用売り建て（空売り＝貸借銘柄）が制度上可能か。銘柄マスタ由来。
+   * 未指定(undefined)=不明。ポリシー設定上の可否（getMarginPolicy）とは別レイヤ。
+   */
+  shortMarginable: z.boolean().optional(),
 });
 export type Instrument = z.infer<typeof Instrument>;

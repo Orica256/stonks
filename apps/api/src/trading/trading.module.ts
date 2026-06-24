@@ -21,6 +21,7 @@ import { PortfolioModule } from "../portfolio/portfolio.module.js";
 import { MarketDataModule } from "../market-data/market-data.module.js";
 import { TradingService } from "./trading.service.js";
 import { OrdersController } from "./orders.controller.js";
+import { MarginController } from "./margin.controller.js";
 import { ConfigMarginPolicyProvider } from "./config-margin-policy.provider.js";
 
 /**
@@ -60,7 +61,7 @@ class OrderEvaluationScheduler
  */
 @Module({
   imports: [PersistenceModule, PortfolioModule, MarketDataModule],
-  controllers: [OrdersController],
+  controllers: [OrdersController, MarginController],
   providers: [
     // 信用（MARGIN）発注の保証金/金利規定値プロバイダ（config 由来。未配線だと
     // trading-engine が MARGIN を一律拒否するため、ここで配線して受理可能にする）。

@@ -8,8 +8,11 @@ import type {
   CorporateAction,
   EquityPoint,
   Instrument,
+  MarginRequirement,
+  MarginType,
   Market,
   Order,
+  OrderSide,
   PerformanceSnapshot,
   PlaceBracketOrderCommand,
   PlaceOrderCommand,
@@ -78,6 +81,44 @@ export function getInstrument(
   return apiRequest<Instrument>(
     `/instruments/${encodeURIComponent(instrumentId)}`,
     { signal },
+  );
+}
+
+/** `GET /instruments/:id/margin-requirement` の入力（spec §2.2 / Phase 7）。 */
+export interface MarginRequirementParams {
+  side: OrderSide;
+  /** 正の整数。 */
+  quantity: number;
+  /** DecimalString（任意。省略時 api が最新価格を使用）。 */
+  price?: string | undefined;
+  /** 既定 MARGIN。 */
+  marginType?: MarginType | undefined;
+}
+
+/**
+ * `GET /instruments/:id/margin-requirement`（信用建ての必要保証金プレビュー。Phase 7）。
+ *
+ * 数量・価格・side から建玉の総代金/必要保証金/適用保証金率を概算して返す。
+ * 信用不可（policy 未設定 / marginTradable=false で BUY / shortMarginable=false で SELL）の
+ * 場合 api は HTTP 400 を返し、既存 `ApiError` として呼び出し側へ伝播する（捏造値を返さない）。
+ * 金額は DecimalString のまま受け取り、web では表示整形のみ行う（CLAUDE.md §0）。
+ */
+export function getMarginRequirement(
+  instrumentId: string,
+  params: MarginRequirementParams,
+  signal?: AbortSignal,
+): Promise<MarginRequirement> {
+  return apiRequest<MarginRequirement>(
+    `/instruments/${encodeURIComponent(instrumentId)}/margin-requirement`,
+    {
+      query: {
+        side: params.side,
+        quantity: params.quantity,
+        price: params.price,
+        marginType: params.marginType,
+      },
+      signal,
+    },
   );
 }
 
