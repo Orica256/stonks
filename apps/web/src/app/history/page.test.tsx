@@ -152,6 +152,23 @@ describe("HistoryPage", () => {
     expect(screen.getByText(/\$190\.50/)).toBeInTheDocument();
   });
 
+  it("各行に資金区分バッジを表示する（MARGIN→信用 / 未指定→現物）", () => {
+    hookState.trades = {
+      data: [
+        trade({ id: "t-margin", instrumentId: "TSE:7203", marginType: "MARGIN" }),
+        // marginType 未指定 → 現物（CASH 既定）。
+        trade({ id: "t-cash", instrumentId: "NASDAQ:AAPL", currency: "USD" }),
+      ],
+      isLoading: false,
+      isError: false,
+      error: null,
+    };
+    render(<HistoryPage />);
+
+    expect(screen.getByText("信用")).toBeInTheDocument();
+    expect(screen.getByText("現物")).toBeInTheDocument();
+  });
+
   it("instrumentId が不正形式なら生文字列を表示し金額は Trade 通貨で整形する", () => {
     hookState.trades = {
       data: [

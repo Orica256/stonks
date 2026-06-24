@@ -468,6 +468,7 @@ GET  /accounts/:id/summary
 GET  /accounts/:id/trades
 GET  /accounts/:id/history          (資産推移=エクイティカーブ)
 GET  /accounts/:id/tax?from=&to=    (譲渡益課税の概算。P1。既定=年初来)
+GET  /accounts/:id/tax-lots?open=   (税ロット一覧。建玉別 CASH/MARGIN。open=true で未決済のみ。P2)
 POST /accounts/:id/corporate-actions  (配当受取/分割調整の適用。P1)
 POST /backtests
 POST /agents                          (AgentProfile 作成)

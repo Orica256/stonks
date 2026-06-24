@@ -15,6 +15,7 @@ import {
   type PortfolioService,
   type PortfolioSummary,
   type PositionView,
+  type TaxLot,
 } from "@stonks/contracts";
 import { TOKENS } from "../common/tokens.js";
 
@@ -24,6 +25,7 @@ import { TOKENS } from "../common/tokens.js";
  *   GET  /accounts/:id/summary
  *   GET  /accounts/:id/history?from=&to=
  *   GET  /accounts/:id/tax?from=&to=   (譲渡益課税の概算。spec §2.3 P1)
+ *   GET  /accounts/:id/tax-lots?open=  (税ロット一覧。open=true で未決済のみ。spec §2.3 P2)
  *   POST /accounts/:id/corporate-actions   (配当→現金/台帳・分割→ポジション調整。spec §2.3 P1)
  */
 @Controller("accounts/:id")
@@ -87,6 +89,28 @@ export class PortfolioController {
       from: fromDate,
       to: toDate,
     });
+  }
+
+  /**
+   * 税ロット一覧を返す（spec §2.3 P2 / §5.1 TaxLot。Phase 8.1）。
+   * portfolio の `getTaxLots` に委譲し、契約型 `TaxLot[]`（建玉別 marginType を含む）をそのまま返す
+   * （web も同型を消費＝形ズレ回避）。`open` クエリが `"true"` のとき残数量 > 0 の未決済ロットのみ、
+   * 既定（未指定/それ以外）は全件を取得日昇順で返す。
+   *
+   * `getTaxLots` は PortfolioService 契約上 optional のため、未実装の実装が注入された場合は 501 を返す
+   * （既定の DefaultPortfolioService は実装済み。/tax と同じ optional ガード流儀）。
+   */
+  @Get("tax-lots")
+  taxLots(
+    @Param("id") accountId: string,
+    @Query("open") open?: string,
+  ): Promise<TaxLot[]> {
+    if (!this.portfolio.getTaxLots) {
+      throw new NotImplementedException(
+        "tax lots are not supported by this portfolio service",
+      );
+    }
+    return this.portfolio.getTaxLots(accountId, open === "true");
   }
 
   /**
