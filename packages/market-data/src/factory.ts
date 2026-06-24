@@ -4,6 +4,7 @@ import { FinnhubAdapter } from "./adapters/finnhub.js";
 import { YahooAdapter } from "./adapters/yahoo.js";
 import { JQuantsAdapter } from "./adapters/jquants.js";
 import { ExchangeRateAdapter } from "./adapters/exchangerate.js";
+import { parseMarginEligibilityEnv } from "./margin-eligibility.js";
 
 export interface FactoryOptions extends AdapterDeps {
   env?: Record<string, string | undefined>;
@@ -25,10 +26,14 @@ export const createMarketDataProvider = (
   opts: FactoryOptions = {},
 ): MarketDataRegistry => {
   const env = opts.env ?? process.env;
+  // 信用建て可否の override は呼び出し側指定を優先し、無ければ env から読む。
+  const marginEligibility =
+    opts.marginEligibility ?? parseMarginEligibilityEnv(env);
   const deps: AdapterDeps = {
     ...(opts.fetchFn ? { fetchFn: opts.fetchFn } : {}),
     ...(opts.now ? { now: opts.now } : {}),
     ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+    marginEligibility,
   };
 
   const finnhub = FinnhubAdapter.fromEnv(env, deps);

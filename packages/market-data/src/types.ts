@@ -9,6 +9,7 @@ import type {
   Quote,
 } from "@stonks/contracts";
 import type { FetchFn } from "./http.js";
+import type { MarginEligibilityOptions } from "./margin-eligibility.js";
 
 /**
  * 単一プロバイダの能力を表す内部アダプタ契約。
@@ -51,4 +52,10 @@ export interface AdapterDeps {
   now?: () => number;
   /** 単一リクエストのタイムアウト（ms）。 */
   timeoutMs?: number;
+  /**
+   * 信用建て可否（貸借区分）の解決設定（override マップ等）。
+   * Instrument を組み立てる際に `resolveMarginEligibility` へ渡す。
+   * 未指定ならルール既定のみが適用される（spec §2.2 / §5.1）。
+   */
+  marginEligibility?: MarginEligibilityOptions;
 }

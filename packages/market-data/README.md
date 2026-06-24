@@ -74,6 +74,24 @@ const actions = await md.getCorporateActions({       // CorporateAction[]
 個別アダプタやインフラ部品（`RateLimiter` / `TtlCache`）も export しており、
 ingestion-worker からの取込・バックフィルで再利用できる。
 
+### 信用建て可否（`marginTradable` / `shortMarginable`、spec §2.2 / §5.1）
+
+`Instrument` の `marginTradable`（信用買建の制度上可否）と `shortMarginable`
+（信用売建＝空売り/貸借の制度上可否）を、アダプタが Instrument を組み立てる際に埋める。
+無料 API は銘柄ごとの貸借区分を提供しないため**捏造はせず**、「明示的なルール＋設定で
+上書き可能なマップ」で妥当な既定を与える（純関数 `resolveMarginEligibility`）。
+解決は**フラグ単位**で次の先勝ち優先順:
+
+1. **override マップ**の明示指定（instrumentId 単位・フラグ単位で最優先）
+2. **ルールベース既定**:
+   - 主要取引所（TSE/NYSE/NASDAQ）上場の STOCK/ETF は `marginTradable=true`
+   - 空売り `shortMarginable` は US 株/ETF=`true`、**JP は貸借銘柄に限られ個別判定不能のため
+     安全側で `undefined`（不明＝抑止しない）**。貸借銘柄は override で個別に true/false 指定
+3. どちらでも決まらなければ `undefined`（不明）。`false`（=制度上不可）と `undefined`（=不明）は
+   明確に区別し、判断不能なら `false` を勝手に入れない。
+
+これは銘柄マスタ由来の確定情報ではなく、シミュレーションとして妥当な既定ルールである。
+
 ## 設計上のポイント
 
 - **fetch は DI**（`FetchFn`）。既定は Node 標準 `fetch`（新規 HTTP 依存は追加しない）。
@@ -86,10 +104,18 @@ ingestion-worker からの取込・バックフィルで再利用できる。
 ## 環境変数（`.env`。`.env.example` 参照）
 
 ```
-FINNHUB_API_KEY        # 未設定なら Finnhub はスキップ
-JQUANTS_REFRESH_TOKEN  # 未設定なら J-Quants はスキップ
-FX_API_BASE            # 既定 https://api.exchangerate.host
+FINNHUB_API_KEY            # 未設定なら Finnhub はスキップ
+JQUANTS_REFRESH_TOKEN      # 未設定なら J-Quants はスキップ
+FX_API_BASE                # 既定 https://api.exchangerate.host
+MARGIN_TRADABLE_OVERRIDES  # 信用買建可否の上書き（カンマ区切り）
+SHORT_MARGINABLE_OVERRIDES # 信用売建(空売り)可否の上書き（カンマ区切り）
 ```
+
+`*_OVERRIDES` の各トークンは `EXCHANGE:SYMBOL[:FLAG]` 形式。`FLAG` は
+`+`/`true`/`1`/`yes`=true、`-`/`false`/`0`/`no`=false、省略時は true（許可リスト運用）。
+instrumentId 自体が `:` を含むため、コロンが 2 つ以上ある場合のみ末尾を FLAG とみなす。
+例: `MARGIN_TRADABLE_OVERRIDES="TSE:9984,TSE:1234:false"` /
+`SHORT_MARGINABLE_OVERRIDES="TSE:7203:true,TSE:1234:false"`。
 
 ## コマンド
 

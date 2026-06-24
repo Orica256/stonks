@@ -88,6 +88,45 @@ describe("YahooAdapter normalization", () => {
     expect(us[0]!.currency).toBe("USD");
   });
 
+  it("populates margin-eligibility flags by rule (US=true/true, JP=true/undefined)", async () => {
+    const { fn } = singleFetch({
+      json: {
+        quotes: [
+          { symbol: "AAPL", longname: "Apple Inc.", quoteType: "EQUITY" },
+          { symbol: "7203.T", longname: "Toyota", quoteType: "EQUITY" },
+        ],
+      },
+    });
+    const yahoo = new YahooAdapter({ fetchFn: fn });
+    const all = await yahoo.searchInstruments("a");
+    const aapl = all.find((i) => i.id === "NASDAQ:AAPL")!;
+    const toyota = all.find((i) => i.id === "TSE:7203")!;
+    expect(aapl.marginTradable).toBe(true);
+    expect(aapl.shortMarginable).toBe(true);
+    expect(toyota.marginTradable).toBe(true);
+    expect(toyota.shortMarginable).toBeUndefined();
+  });
+
+  it("applies margin-eligibility overrides on search results", async () => {
+    const { fn } = singleFetch({
+      json: {
+        quotes: [
+          { symbol: "7203.T", longname: "Toyota", quoteType: "EQUITY" },
+        ],
+      },
+    });
+    const yahoo = new YahooAdapter({
+      fetchFn: fn,
+      marginEligibility: {
+        overrides: { "TSE:7203": { shortMarginable: true } },
+      },
+    });
+    const [toyota] = await yahoo.searchInstruments("toyota", "JP");
+    expect(Instrument.parse(toyota)).toEqual(toyota);
+    expect(toyota!.marginTradable).toBe(true);
+    expect(toyota!.shortMarginable).toBe(true);
+  });
+
   it("normalizes dividend and split corporate actions", async () => {
     const { fn, calls } = singleFetch({
       json: {

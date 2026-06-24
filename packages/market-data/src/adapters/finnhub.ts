@@ -16,6 +16,10 @@ import {
   parseInstrumentId,
   toFinnhubSymbol,
 } from "../symbols.js";
+import {
+  resolveMarginEligibility,
+  type MarginEligibilityOptions,
+} from "../margin-eligibility.js";
 
 const NAME = "finnhub";
 const BASE = "https://finnhub.io/api/v1";
@@ -66,11 +70,13 @@ export class FinnhubAdapter implements ProviderAdapter {
   private readonly fetchFn: FetchFn;
   private readonly timeoutMs: number;
   private readonly limiter: RateLimiter;
+  private readonly marginEligibility: MarginEligibilityOptions;
 
   constructor(config: FinnhubConfig) {
     this.apiKey = config.apiKey;
     this.fetchFn = config.fetchFn ?? defaultFetch;
     this.timeoutMs = config.timeoutMs ?? 8000;
+    this.marginEligibility = config.marginEligibility ?? {};
     // 無料枠 60 req/min を尊重。安全側に倍の窓を確保。
     this.limiter = new RateLimiter({
       intervalMs: 60_000,
@@ -178,17 +184,21 @@ export class FinnhubAdapter implements ProviderAdapter {
       // 取引所サフィックス付き（外国市場）は無料枠の対象外として除外。
       if (!sym || sym.includes(".")) continue;
       const exchange = "NASDAQ" as const; // Finnhub 検索は取引所を返さないため既定。
+      const id = buildInstrumentId(exchange, sym);
+      const type = item.type === "ETF" ? "ETF" : "STOCK";
       out.push({
-        id: buildInstrumentId(exchange, sym),
+        id,
         symbol: sym.toUpperCase(),
         exchange,
         market: "US",
         name: item.description ?? sym,
         currency: "USD",
-        type: item.type === "ETF" ? "ETF" : "STOCK",
+        type,
         lotSize: 1,
         tickRules: [],
         isActive: true,
+        // 貸借区分上の信用建て可否（ルール既定＋override）。不明な側は省略（undefined）。
+        ...resolveMarginEligibility({ id, market: "US", type }, this.marginEligibility),
       });
     }
     return out;
