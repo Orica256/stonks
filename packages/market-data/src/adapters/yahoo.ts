@@ -12,6 +12,10 @@ import { DomainError } from "@stonks/contracts";
 import type { AdapterDeps, ProviderAdapter } from "../types.js";
 import { defaultFetch, getJson, type FetchFn } from "../http.js";
 import { RateLimiter } from "../rate-limiter.js";
+import {
+  resolveMarginEligibility,
+  type MarginEligibilityOptions,
+} from "../margin-eligibility.js";
 import { toDecimalString, divideToDecimalString, epochSecToIso } from "../decimal-util.js";
 import {
   buildInstrumentId,
@@ -91,10 +95,12 @@ export class YahooAdapter implements ProviderAdapter {
   private readonly fetchFn: FetchFn;
   private readonly timeoutMs: number;
   private readonly limiter: RateLimiter;
+  private readonly marginEligibility: MarginEligibilityOptions;
 
   constructor(deps: AdapterDeps = {}) {
     this.fetchFn = deps.fetchFn ?? defaultFetch;
     this.timeoutMs = deps.timeoutMs ?? 8000;
+    this.marginEligibility = deps.marginEligibility ?? {};
     // 非公式 API。自主規制として ~1.5 req/s 程度に抑える。
     this.limiter = new RateLimiter({
       intervalMs: 1000,
@@ -282,17 +288,24 @@ export class YahooAdapter implements ProviderAdapter {
     name: string,
     quoteType: string,
   ): Instrument {
+    const id = buildInstrumentId(parsed.exchange, parsed.symbol);
+    const type = quoteType === "ETF" ? "ETF" : "STOCK";
     return {
-      id: buildInstrumentId(parsed.exchange, parsed.symbol),
+      id,
       symbol: parsed.symbol,
       exchange: parsed.exchange,
       market: parsed.market,
       name,
       currency: parsed.currency,
-      type: quoteType === "ETF" ? "ETF" : "STOCK",
+      type,
       lotSize: parsed.market === "JP" ? 100 : 1,
       tickRules: [],
       isActive: true,
+      // 貸借区分上の信用建て可否（ルール既定＋override）。不明な側は省略（undefined）。
+      ...resolveMarginEligibility(
+        { id, market: parsed.market, type },
+        this.marginEligibility,
+      ),
     };
   }
 }

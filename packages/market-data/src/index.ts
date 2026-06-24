@@ -40,3 +40,12 @@ export {
   toJQuantsCode,
 } from "./symbols.js";
 export type { ParsedInstrumentId } from "./symbols.js";
+export {
+  resolveMarginEligibility,
+  parseMarginEligibilityEnv,
+} from "./margin-eligibility.js";
+export type {
+  MarginEligibility,
+  MarginEligibilityOverride,
+  MarginEligibilityOptions,
+} from "./margin-eligibility.js";
