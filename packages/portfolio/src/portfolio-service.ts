@@ -408,6 +408,9 @@ export class DefaultPortfolioService implements PortfolioService {
       method: this.costBasisMethod,
       taxAccountType: this.taxAccountType,
       acquiredTradeId: trade.id,
+      // Phase 8: 資金区分を自己記述。CASH 現物 / MARGIN 信用のロットを区別し、
+      // 取り崩しが区分をまたいで混ざらないようにする（Trade を信頼。未指定=CASH）。
+      marginType: trade.marginType ?? "CASH",
     };
     await this.repo.appendTaxLot(taxLot);
 
@@ -557,6 +560,10 @@ export class DefaultPortfolioService implements PortfolioService {
    * - FIFO: 取得日昇順、LIFO: 降順、SPECIFIC_LOT: 明示選択が無いため当面 FIFO 順に倒す。
    * - AVERAGE: 取り崩し自体は FIFO 順で remainingQuantity を減らすが、取得原価は
    *   平均建値（`avgCost × qty`）を用い、Phase 2 の実現損益と完全一致させる。
+   * Phase 8: 取り崩し対象は売り Trade と**同一の資金区分**（marginType ?? "CASH"）の
+   * ロットに限定する。CASH 現物と MARGIN 信用の同一銘柄ロットが取り崩し順・原価で
+   * 混ざらないようにする（Phase 5 申し送りの解消）。現物のみフロー（未指定=CASH）は
+   * 全ロットが同一区分に集約されるため従来挙動と完全に一致する。
    * 取り崩した各ロットの remainingQuantity を upsert し、内訳（TaxLotConsumption）と
    * 取得原価合計（costBasis）を返す。
    */
@@ -566,7 +573,12 @@ export class DefaultPortfolioService implements PortfolioService {
     avgCost: Decimal,
   ): Promise<{ consumptions: TaxLotConsumption[]; costBasis: Decimal }> {
     const lots = await this.repo.listTaxLots(trade.accountId, trade.instrumentId);
-    const open = lots.filter((l) => new Decimal(l.remainingQuantity).gt(ZERO));
+    const tradeMargin = trade.marginType ?? "CASH";
+    const open = lots.filter(
+      (l) =>
+        new Decimal(l.remainingQuantity).gt(ZERO) &&
+        (l.marginType ?? "CASH") === tradeMargin,
+    );
     const ordered = this.costBasisMethod === "LIFO" ? [...open].reverse() : open;
 
     const consumptions: TaxLotConsumption[] = [];

@@ -289,8 +289,13 @@ export class PrismaPortfolioRepository implements PortfolioRepository {
   }
 }
 
-/** contracts.TaxLot → Prisma create/update data。 */
-function taxLotData(lot: TaxLot) {
+/**
+ * contracts.TaxLot → Prisma create/update data。
+ *
+ * Phase 8: 資金区分 marginType を明示的に保存する。現物（未指定）は DB 既定に頼らず
+ * "CASH" に倒す（Position upsert と同じ流儀）。CASH/MARGIN を分離して取り崩すための区分。
+ */
+export function taxLotData(lot: TaxLot) {
   return {
     id: lot.id,
     accountId: lot.accountId,
@@ -302,12 +307,18 @@ function taxLotData(lot: TaxLot) {
     acquiredAt: new Date(lot.acquiredAt),
     method: lot.method,
     taxAccountType: lot.taxAccountType,
+    marginType: lot.marginType ?? "CASH",
     ...(lot.acquiredTradeId !== undefined ? { acquiredTradeId: lot.acquiredTradeId } : {}),
   };
 }
 
-/** Prisma TaxLot 行 → contracts.TaxLot。 */
-function toTaxLot(row: {
+/**
+ * Prisma TaxLot 行 → contracts.TaxLot。
+ *
+ * Phase 8: 資金区分 marginType を復元する（DB は @default(CASH) で必ず値を持つので
+ * method/taxAccountType と同様にそのまま載せる）。
+ */
+export function toTaxLot(row: {
   id: string;
   accountId: string;
   instrumentId: string;
@@ -318,6 +329,7 @@ function toTaxLot(row: {
   acquiredAt: Date;
   method: TaxLot["method"];
   taxAccountType: TaxLot["taxAccountType"];
+  marginType: MarginType;
   acquiredTradeId: string | null;
 }): TaxLot {
   return {
@@ -331,6 +343,7 @@ function toTaxLot(row: {
     acquiredAt: row.acquiredAt.toISOString(),
     method: row.method,
     taxAccountType: row.taxAccountType,
+    marginType: row.marginType,
     ...(row.acquiredTradeId !== null ? { acquiredTradeId: row.acquiredTradeId } : {}),
   };
 }
