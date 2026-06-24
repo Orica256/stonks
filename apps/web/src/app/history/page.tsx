@@ -16,6 +16,7 @@ import {
   resolveInstrumentDisplay,
   type InstrumentDisplay,
 } from "@/lib/instrument-display";
+import { MarginBadge } from "@/components/ui/margin-badge";
 import { DEFAULT_ACCOUNT_ID } from "@/lib/env";
 
 /**
@@ -122,6 +123,7 @@ function TradeRow({
           {display.name && (
             <span className="text-neutral-500">（{display.name}）</span>
           )}
+          <MarginBadge marginType={trade.marginType} />
         </div>
       </td>
       <td

@@ -21,6 +21,8 @@ import {
   formatRatePercent,
   pnlColorClass,
 } from "@/lib/format";
+import { MarginBadge } from "@/components/ui/margin-badge";
+import { TaxLotsPanel } from "@/features/portfolio/tax-lots-panel";
 import { DEFAULT_ACCOUNT_ID } from "@/lib/env";
 
 /**
@@ -94,7 +96,12 @@ export default function PortfolioPage(): JSX.Element {
                 <tbody>
                   {positions.data.map((p) => (
                     <tr key={p.id} className="border-t border-neutral-100">
-                      <td className="py-2 pr-4 font-medium">{p.instrumentId}</td>
+                      <td className="py-2 pr-4 font-medium">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span>{p.instrumentId}</span>
+                          <MarginBadge marginType={p.marginType} />
+                        </div>
+                      </td>
                       <td className="py-2 pr-4 text-right">
                         {formatQuantity(p.quantity)}
                       </td>
@@ -174,6 +181,8 @@ export default function PortfolioPage(): JSX.Element {
           </p>
         </CardContent>
       </Card>
+
+      <TaxLotsPanel accountId={accountId} />
     </div>
   );
 }

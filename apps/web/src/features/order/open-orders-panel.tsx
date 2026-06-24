@@ -12,6 +12,7 @@ import { ApiError } from "@/lib/api/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
+import { MarginBadge } from "@/components/ui/margin-badge";
 import { cn } from "@/lib/cn";
 import { formatMoney, formatQuantity, formatTimestamp } from "@/lib/format";
 import {
@@ -222,6 +223,7 @@ function OrderRow({
         </span>
         <span className="tabular-nums text-neutral-700">{price}</span>
         <span className="text-neutral-500">{order.timeInForce}</span>
+        <MarginBadge marginType={order.marginType} />
         <Badge tone="status">{orderStatusLabel(order.status)}</Badge>
         <Badge tone={order.activation === "WAITING" ? "muted" : "active"}>
           {activationLabel(order.activation)}

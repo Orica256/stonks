@@ -24,6 +24,7 @@ import type {
   PriceBar,
   Quote,
   RunBacktestRequest,
+  TaxLot,
   Timeframe,
   Trade,
 } from "@stonks/contracts";
@@ -227,6 +228,22 @@ export function useCapitalGainsTax(
   return useQuery({
     queryKey: queryKeys.capitalGainsTax(accountId, range),
     queryFn: ({ signal }) => api.getCapitalGainsTax(accountId, range, signal),
+    retry: false,
+  });
+}
+
+/**
+ * 税ロット内訳（spec §2.3 P2 / §5.1 TaxLot。Phase 8.1。`GET /accounts/:id/tax-lots`）。
+ * `open` を渡すと未決済（remainingQuantity>0）のみに絞る。既定は全件。
+ * 別担当のエンドポイント未提供でもアプリを壊さないよう retry:false で穏当に縮退させる。
+ */
+export function useTaxLots(
+  accountId: string,
+  open?: boolean,
+): UseQueryResult<TaxLot[]> {
+  return useQuery({
+    queryKey: queryKeys.taxLots(accountId, open),
+    queryFn: ({ signal }) => api.getTaxLots(accountId, { open }, signal),
     retry: false,
   });
 }

@@ -21,6 +21,7 @@ import type {
   PriceBar,
   Quote,
   RunBacktestRequest,
+  TaxLot,
   Timeframe,
   Trade,
 } from "@stonks/contracts";
@@ -266,6 +267,27 @@ export function getCapitalGainsTax(
   return apiRequest<CapitalGainsTaxEstimate[]>(
     `/accounts/${encodeURIComponent(accountId)}/tax`,
     { query: { from: range?.from, to: range?.to }, signal },
+  );
+}
+
+/**
+ * `GET /accounts/:id/tax-lots?open=`（spec §2.3 P2 / §5.1 TaxLot。Phase 8.1）。
+ * 取得（現物買い/買い建て）ごとの税ロット内訳を返す。`open: true` を渡すと
+ * 未決済（remainingQuantity>0）のみに絞れる。既定（未指定）は全件。
+ * 戻り値は契約型 `TaxLot[]` そのまま（手書き型を作らない）。建玉別（CASH/MARGIN）の
+ * 区分は各ロットの `marginType`（未指定=CASH）で表現される。
+ */
+export function getTaxLots(
+  accountId: string,
+  params?: { open?: boolean | undefined },
+  signal?: AbortSignal,
+): Promise<TaxLot[]> {
+  return apiRequest<TaxLot[]>(
+    `/accounts/${encodeURIComponent(accountId)}/tax-lots`,
+    {
+      query: params?.open ? { open: "true" } : undefined,
+      signal,
+    },
   );
 }
 
