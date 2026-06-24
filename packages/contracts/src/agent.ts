@@ -1,5 +1,12 @@
 import { z } from "zod";
-import { DateRange, DecimalString, Id, Timestamp } from "./common.js";
+import {
+  Currency,
+  DateRange,
+  DecimalString,
+  Id,
+  Quantity,
+  Timestamp,
+} from "./common.js";
 import { PlaceOrderCommand, type Order } from "./order.js";
 
 /** エージェントの動作モード（spec §2.7）。 */
@@ -53,12 +60,19 @@ export type AgentDecision = z.infer<typeof AgentDecision>;
 export const AgentObservation = z.object({
   accountId: Id,
   asOf: Timestamp,
-  cashByCurrency: z.record(DecimalString),
+  /**
+   * 通貨別の現金（キーは `Currency`、値は DecimalString）。
+   * 値は通貨コードでのみ引かれる（baseCurrency 等）ため、緩い `z.record(DecimalString)`
+   * からキーを `Currency` に締める。Zod の enum-key record は部分集合を許容するため
+   * `{ JPY: ... }` のみ・空オブジェクトも parse 成功で実行時等価（既知/未知キーの判定が
+   * 厳格化されるのみ）。
+   */
+  cashByCurrency: z.record(Currency, DecimalString),
   positions: z.array(
     z.object({
       instrumentId: Id,
       symbol: z.string(),
-      quantity: z.number(),
+      quantity: Quantity,
       marketPrice: DecimalString,
       unrealizedPnlPct: z.number(),
     }),

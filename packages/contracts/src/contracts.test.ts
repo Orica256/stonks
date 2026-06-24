@@ -9,6 +9,8 @@ import {
   parseInstrumentId,
   GetCorporateActionsRequest,
   BenchmarkComparisonResult,
+  AgentObservation,
+  BacktestResult,
 } from "./index.js";
 
 describe("Money schema", () => {
@@ -148,6 +150,89 @@ describe("BenchmarkComparisonResult schema (benchmark unavailable reason)", () =
       available: false,
       benchmark: "SP500",
       reason: "WHATEVER",
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("AgentObservation.cashByCurrency key tightening (型締め)", () => {
+  const base = {
+    accountId: "a1",
+    asOf: "2026-06-19T00:00:00Z",
+    positions: [],
+    recentQuotes: [],
+  };
+
+  it("accepts a partial currency-keyed cash map (後方互換: JPY のみ)", () => {
+    const r = AgentObservation.safeParse({
+      ...base,
+      cashByCurrency: { JPY: "500000" },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts an empty cash map", () => {
+    const r = AgentObservation.safeParse({ ...base, cashByCurrency: {} });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects an unknown currency key", () => {
+    const r = AgentObservation.safeParse({
+      ...base,
+      cashByCurrency: { EUR: "1" },
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects a non-decimal cash value", () => {
+    const r = AgentObservation.safeParse({
+      ...base,
+      cashByCurrency: { JPY: 500000 },
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects a negative position quantity (Quantity 締め)", () => {
+    const r = AgentObservation.safeParse({
+      ...base,
+      cashByCurrency: {},
+      positions: [
+        {
+          instrumentId: "i1",
+          symbol: "7203",
+          quantity: -1,
+          marketPrice: "100",
+          unrealizedPnlPct: 0,
+        },
+      ],
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("BacktestResult.equityCurve ts tightening (型締め)", () => {
+  const base = {
+    metrics: {
+      totalReturn: 0.1,
+      maxDrawdown: 0.05,
+      sharpe: 1,
+      winRate: 0.5,
+      trades: 3,
+    },
+  };
+
+  it("accepts a UTC ISO8601 ts", () => {
+    const r = BacktestResult.safeParse({
+      ...base,
+      equityCurve: [{ ts: "2026-01-01T00:00:00.000Z", equity: "1000000" }],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects a non-timestamp ts string", () => {
+    const r = BacktestResult.safeParse({
+      ...base,
+      equityCurve: [{ ts: "not-a-date", equity: "1000000" }],
     });
     expect(r.success).toBe(false);
   });

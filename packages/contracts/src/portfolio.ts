@@ -102,6 +102,15 @@ export interface PortfolioService {
   applyTrade(trade: Trade): Promise<void>;
   getPositions(accountId: string): Promise<PositionView[]>;
   getSummary(accountId: string): Promise<PortfolioSummary>;
+  /**
+   * 口座のエクイティ系列（spec §6.3）。
+   *
+   * **エクイティの意味（B9）**: 現状の実装はコストベース（cost basis）— 約定の取得原価と
+   * 現金から決定的に算出し、PriceProvider への mark-to-market 依存を持たない（provider 非依存・
+   * 再現可能）。時価評価（mark-to-market）系列が必要になった場合は別メソッド/別引数で追加し、
+   * この決定的系列の意味は据え置く。基準点（入金直後のスナップショット）は portfolio 実装側の
+   * EquityPoint 記録タイミングに依存する（B9 の未決＝基準点正確化は実装連動のため別途）。
+   */
   getHistory(
     accountId: string,
     range: { from: Date; to: Date },
