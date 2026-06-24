@@ -432,6 +432,7 @@ GET  /instruments?q=&market=
 GET  /instruments/:id              (単一銘柄取得。未存在は 404)
 GET  /instruments/:id/bars?timeframe=&from=&to=
 GET  /instruments/:id/quote
+GET  /instruments/:id/margin-requirement?side=&quantity=&price=&marginType=  (必要保証金プレビュー。信用建て前提)
 GET  /quotes/stream            (SSE)
 POST /accounts/:id/orders
 GET  /accounts/:id/orders?open=    (注文一覧。open=true でオープン/待機のみ)

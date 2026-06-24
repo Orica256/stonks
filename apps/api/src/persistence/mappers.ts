@@ -51,6 +51,14 @@ export const toInstrument = (
   lotSize: row.lotSize,
   tickRules: (Array.isArray(row.tickRules) ? row.tickRules : []) as TickRule[],
   isActive: row.isActive,
+  // 信用買建/売建の制度上可否（Phase 7）。DB は NULL=不明。contracts は optional のため
+  // NULL は省略（undefined）し、true/false のみ明示する。
+  ...(row.marginTradable != null
+    ? { marginTradable: row.marginTradable }
+    : {}),
+  ...(row.shortMarginable != null
+    ? { shortMarginable: row.shortMarginable }
+    : {}),
 });
 
 /** Prisma の Order 行を contracts.Order に変換する。 */
