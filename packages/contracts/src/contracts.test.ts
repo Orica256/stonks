@@ -168,4 +168,36 @@ describe("Instrument schema", () => {
     expect(r.tickRules).toEqual([]);
     expect(r.isActive).toBe(true);
   });
+
+  it("keeps margin flags optional (未指定でも parse 成功・後方互換)", () => {
+    const r = Instrument.parse({
+      id: "TSE:7203",
+      symbol: "7203",
+      exchange: "TSE",
+      market: "JP",
+      name: "Toyota",
+      currency: "JPY",
+      type: "STOCK",
+      lotSize: 100,
+    });
+    expect(r.marginTradable).toBeUndefined();
+    expect(r.shortMarginable).toBeUndefined();
+  });
+
+  it("accepts explicit margin flags", () => {
+    const r = Instrument.parse({
+      id: "TSE:7203",
+      symbol: "7203",
+      exchange: "TSE",
+      market: "JP",
+      name: "Toyota",
+      currency: "JPY",
+      type: "STOCK",
+      lotSize: 100,
+      marginTradable: true,
+      shortMarginable: false,
+    });
+    expect(r.marginTradable).toBe(true);
+    expect(r.shortMarginable).toBe(false);
+  });
 });

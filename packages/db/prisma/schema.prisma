@@ -152,6 +152,9 @@ model Instrument {
   lotSize   Int            @default(1)
   tickRules Json           @default("[]")
   isActive  Boolean        @default(true)
+  // ── 信用可否（貸借区分。銘柄マスタ由来。NULL=不明。Phase 7） ──
+  marginTradable  Boolean? // 信用買い建て（新規買建）が制度上可能か
+  shortMarginable Boolean? // 信用売り建て（空売り＝貸借銘柄）が制度上可能か
 
   bars             PriceBar[]
   quotes           Quote[]
