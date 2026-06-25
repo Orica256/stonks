@@ -30,6 +30,7 @@ import type {
 } from "@stonks/contracts";
 import * as api from "./endpoints";
 import { queryKeys } from "./query-keys";
+import { timeframeRange } from "@/features/chart/lib/timeframe-range";
 
 /**
  * サーバ状態は TanStack Query で管理する（spec §3, frontend-dev 原則）。
@@ -138,14 +139,29 @@ export function useMarginRequirement(
   });
 }
 
+/**
+ * 時間足別のローソク足取得（`GET /instruments/:id/bars`。spec §6.8）。
+ *
+ * 時間足ごとに妥当なルックバック窓（from/to）を `timeframeRange` で算出して渡す。
+ * 省略すると API が時間足に関係なく直近365日へフォールバックし、分足で1年分を要求して
+ * しまうのを防ぐ。`now` は queryFn 内でフェッチ時に算出するため毎レンダーでキャッシュキーが
+ * 揺れず（range は timeframe から一意に決まり queryKey の timeframe で識別できる）、
+ * 無限再フェッチを起こさない。
+ */
 export function useBars(
   instrumentId: string | undefined,
   timeframe: Timeframe,
 ): UseQueryResult<PriceBar[]> {
   return useQuery({
     queryKey: queryKeys.bars(instrumentId ?? "", timeframe),
-    queryFn: ({ signal }) =>
-      api.getBars(instrumentId as string, { timeframe }, signal),
+    queryFn: ({ signal }) => {
+      const { from, to } = timeframeRange(timeframe, new Date());
+      return api.getBars(
+        instrumentId as string,
+        { timeframe, from, to },
+        signal,
+      );
+    },
     enabled: Boolean(instrumentId),
   });
 }
